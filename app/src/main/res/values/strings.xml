@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">Audio Recorder</string>
+    <string name="play">Play</string>
+    <string name="delete">Delete</string>
+    <string name="record">Record</string>
+    <string name="stop">Stop</string>
+    <string name="voice_recording">Voice Recording</string>
+    <string name="text_note">Text Note</string>
+    <string name="choose_type">Choose Recording Type</string>
+    <string name="enter_text">Enter Text Note</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+</resources>

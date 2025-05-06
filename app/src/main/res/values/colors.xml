@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Modern color palette -->
+    <color name="modern_primary">#2196F3</color>
+    <color name="modern_primary_dark">#1976D2</color>
+    <color name="modern_accent">#FF4081</color>
+    <color name="background_light">#F8F9FA</color>
+    <color name="card_background">#FFFFFF</color>
+    <color name="text_primary">#212121</color>
+    <color name="text_secondary">#757575</color>
+    <color name="divider">#E0E0E0</color>
+    <color name="voice_color">#4CAF50</color>
+    <color name="text_color">#2196F3</color>
+    <color name="delete_color">#F44336</color>
+
+    <!-- FAB colors -->
+    <color name="fab_yellow">#FFD54F</color>
+    <color name="fab_main">#FFF5EA</color>
+
+    <!-- Keep the old colors for backward compatibility -->
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>

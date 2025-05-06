@@ -1,0 +1,411 @@
+package com.plcoding.audiorecorder;
+
+import android.Manifest;
+import android.os.Bundle;
+import android.util.Log;
+import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MenuItem;
+import android.view.View;
+import android.view.ViewTreeObserver;
+import android.widget.Toast;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.lifecycle.ViewModelProvider;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import com.google.android.material.snackbar.Snackbar;
+import com.google.android.material.textfield.TextInputEditText;
+import com.plcoding.audiorecorder.data.Recording;
+import com.plcoding.audiorecorder.playback.AndroidAudioPlayer;
+import com.plcoding.audiorecorder.record.AndroidAudioRecorder;
+import com.plcoding.audiorecorder.ui.theme.RecordingAdapter;
+import com.plcoding.audiorecorder.ui.theme.RecordingViewModel;
+import com.plcoding.audiorecorder.utils.DraggableButtonHelper;
+
+public class MainActivity extends AppCompatActivity {
+    private AndroidAudioRecorder recorder;
+    private AndroidAudioPlayer player;
+    private RecordingViewModel viewModel;
+    private RecyclerView recyclerView;
+    private RecordingAdapter adapter;
+
+    // FAB Menu
+    private FloatingActionButton fabMain;
+    private FloatingActionButton fabVoice;
+    private FloatingActionButton fabText;
+    private View overlay;
+    private boolean isFabMenuOpen = false;
+    private boolean isRecording = false;
+
+    private DraggableButtonHelper draggableHelper;
+    private static final String TAG = "MainActivity";
+
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        // Initialize views
+        initializeViews();
+
+        // Initialize recorder and player
+        recorder = new AndroidAudioRecorder(getApplicationContext());
+        player = new AndroidAudioPlayer(getApplicationContext());
+
+        // Initialize ViewModel
+        RecordingViewModel.Factory factory = new RecordingViewModel.Factory(
+                getApplicationContext(),
+                recorder,
+                player
+        );
+        viewModel = new ViewModelProvider(this, factory).get(RecordingViewModel.class);
+
+        // Request permissions
+        ActivityCompat.requestPermissions(
+                this,
+                new String[]{
+                        Manifest.permission.RECORD_AUDIO,
+                        Manifest.permission.INTERNET,
+                        Manifest.permission.ACCESS_NETWORK_STATE
+                },
+                0
+        );
+
+        // Setup RecyclerView
+        setupRecyclerView();
+
+        // Setup FAB menu BEFORE draggable functionality
+        setupFabMenu();
+
+        // Setup draggable functionality AFTER setting click listener
+        setupDraggableFab();
+
+        // Observe ViewModel
+        observeViewModel();
+
+        // Setup dynamic padding
+        setupDynamicPadding();
+    }
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        getMenuInflater().inflate(R.menu.main_menu, menu);
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == R.id.action_sync) {
+            syncRecordings();
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
+    private void syncRecordings() {
+        viewModel.syncWithServer();
+    }
+
+    private void initializeViews() {
+        recyclerView = findViewById(R.id.recordings_recycler_view);
+        fabMain = findViewById(R.id.fab_main);
+        fabVoice = findViewById(R.id.fab_voice);
+        fabText = findViewById(R.id.fab_text);
+        overlay = findViewById(R.id.overlay);
+    }
+
+    private void setupRecyclerView() {
+        recyclerView.setLayoutManager(new LinearLayoutManager(this));
+        adapter = new RecordingAdapter(
+                recording -> {
+                    if (recording.isVoiceRecording()) {
+                        viewModel.playRecording(recording.getId());
+                    } else {
+                        showTextContent(recording.getTextContent());
+                    }
+                },
+                recording -> viewModel.stopPlayback(),
+                recording -> showDeleteConfirmation(recording)
+        );
+        recyclerView.setAdapter(adapter);
+    }
+
+    private void setupFabMenu() {
+        // Set click listener first
+        fabMain.setOnClickListener(v -> handleMainFabClick());
+
+        fabVoice.setOnClickListener(v -> {
+            closeFabMenu();
+            startVoiceRecording();
+        });
+
+        fabText.setOnClickListener(v -> {
+            closeFabMenu();
+            showTextInputDialog();
+        });
+
+        overlay.setOnClickListener(v -> closeFabMenu());
+    }
+
+    private void setupDraggableFab() {
+        draggableHelper = new DraggableButtonHelper();
+        draggableHelper.makeDraggable(fabMain, null);
+
+        // Add listener to update RecyclerView padding when FAB is moved
+        fabMain.getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
+            @Override
+            public void onGlobalLayout() {
+                updateRecyclerViewPadding();
+            }
+        });
+    }
+
+    private void setupDynamicPadding() {
+        // Initial padding setup
+        fabMain.post(this::updateRecyclerViewPadding);
+    }
+
+    private void updateRecyclerViewPadding() {
+        // Get FAB position
+        int[] location = new int[2];
+        fabMain.getLocationOnScreen(location);
+        int fabTop = location[1];
+        int fabHeight = fabMain.getHeight();
+        int fabBottom = fabTop + fabHeight;
+
+        // Get screen dimensions
+        int screenHeight = getResources().getDisplayMetrics().heightPixels;
+
+        // Calculate bottom padding based on FAB position
+        int bottomPadding = screenHeight - fabTop + 20; // Extra 20dp margin
+
+        // Apply padding to RecyclerView
+        recyclerView.setPadding(
+                recyclerView.getPaddingLeft(),
+                recyclerView.getPaddingTop(),
+                recyclerView.getPaddingRight(),
+                bottomPadding
+        );
+    }
+
+    private void handleMainFabClick() {
+        if (isRecording) {
+            stopVoiceRecording();
+        } else {
+            toggleFabMenu();
+        }
+    }
+
+    private void toggleFabMenu() {
+        if (isFabMenuOpen) {
+            closeFabMenu();
+        } else {
+            openFabMenu();
+        }
+    }
+
+    private void openFabMenu() {
+        isFabMenuOpen = true;
+
+        // Show overlay with fade animation
+        overlay.setVisibility(View.VISIBLE);
+        overlay.animate().alpha(1f).setDuration(200).start();
+
+        // Rotate main FAB
+        fabMain.animate().rotation(45f).setDuration(200).start();
+
+        // Show menu FABs with animation - position them relative to main FAB
+        showMenuFabs();
+    }
+
+    private void showMenuFabs() {
+        // Get main FAB position
+        float mainFabX = fabMain.getX();
+        float mainFabY = fabMain.getY();
+
+        // Position voice FAB
+        fabVoice.setX(mainFabX);
+        fabVoice.setY(mainFabY - dpToPx(70));
+        animateFabIn(fabVoice);
+
+        // Position text FAB
+        fabText.setX(mainFabX);
+        fabText.setY(mainFabY - dpToPx(140));
+        animateFabIn(fabText);
+    }
+
+    private void closeFabMenu() {
+        isFabMenuOpen = false;
+
+        // Hide overlay with fade animation
+        overlay.animate().alpha(0f).setDuration(200).withEndAction(() ->
+                overlay.setVisibility(View.GONE)
+        ).start();
+
+        // Rotate main FAB back
+        fabMain.animate().rotation(0f).setDuration(200).start();
+
+        // Hide menu FABs with animation
+        animateFabOut(fabText);
+        animateFabOut(fabVoice);
+    }
+
+    private void animateFabIn(FloatingActionButton fab) {
+        fab.setVisibility(View.VISIBLE);
+        fab.setAlpha(0f);
+        fab.setScaleX(0.5f);
+        fab.setScaleY(0.5f);
+
+        fab.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .setDuration(200)
+                .start();
+    }
+
+    private void animateFabOut(FloatingActionButton fab) {
+        fab.animate()
+                .alpha(0f)
+                .scaleX(0.5f)
+                .scaleY(0.5f)
+                .setDuration(200)
+                .withEndAction(() -> fab.setVisibility(View.INVISIBLE))
+                .start();
+    }
+
+    private void startVoiceRecording() {
+        viewModel.startRecording();
+        isRecording = true;
+
+        // Change main FAB to stop recording
+        fabMain.setImageResource(R.drawable.ic_stop);
+        fabMain.setBackgroundTintList(getResources().getColorStateList(R.color.delete_color));
+
+        Toast.makeText(this, "Recording started", Toast.LENGTH_SHORT).show();
+    }
+
+    private void stopVoiceRecording() {
+        viewModel.stopRecording();
+        isRecording = false;
+
+        // Restore main FAB appearance
+        fabMain.setImageResource(R.drawable.ic_add);
+        fabMain.setBackgroundTintList(getResources().getColorStateList(R.color.fab_main));
+
+        Toast.makeText(this, "Recording stopped", Toast.LENGTH_SHORT).show();
+    }
+
+    private void showTextInputDialog() {
+        View view = LayoutInflater.from(this).inflate(R.layout.dialog_text_input, null);
+        TextInputEditText editText = view.findViewById(R.id.text_input);
+
+        if (editText == null) {
+            Log.e("MainActivity", "EditText not found in dialog layout");
+            Toast.makeText(this, "Error: Input field not found", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Enter Text Note")
+                .setView(view)
+                .setPositiveButton("Save", (dialog, which) -> {
+                    if (editText.getText() == null) {
+                        Log.e("MainActivity", "EditText.getText() returned null");
+                        Toast.makeText(this, "Error: Could not get text", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+
+                    String text = editText.getText().toString().trim();
+                    Log.d("MainActivity", "Text to save: '" + text + "'");
+
+                    if (!text.isEmpty()) {
+                        Log.d("MainActivity", "Calling viewModel.saveTextRecording");
+                        viewModel.saveTextRecording(text);
+                        Toast.makeText(this, "Text note saved", Toast.LENGTH_SHORT).show();
+                    } else {
+                        Log.w("MainActivity", "Text is empty");
+                        Toast.makeText(this, "Text cannot be empty", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void showTextContent(String content) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Text Note")
+                .setMessage(content)
+                .setPositiveButton("OK", null)
+                .show();
+    }
+
+    private void showDeleteConfirmation(Recording recording) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("Delete Recording")
+                .setMessage("Are you sure you want to delete this recording?")
+                .setPositiveButton("Delete", (dialog, which) -> {
+                    viewModel.deleteRecording(recording.getId());
+                    Toast.makeText(this, "Recording deleted", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void observeViewModel() {
+        viewModel.getRecordings().observe(this, recordings -> {
+            if (recordings != null) {
+                adapter.setRecordings(recordings);
+            }
+        });
+
+        viewModel.getIsPlaying().observe(this, isPlaying -> {
+            if (isPlaying != null) {
+                adapter.setIsPlaying(isPlaying);
+            }
+        });
+
+        viewModel.getCurrentlyPlayingId().observe(this, currentlyPlayingId -> {
+            adapter.setCurrentlyPlayingId(currentlyPlayingId);
+        });
+
+        // New sync observers
+        viewModel.getIsSyncing().observe(this, isSyncing -> {
+            if (Boolean.TRUE.equals(isSyncing)) {
+                // Show sync in progress UI
+                Snackbar.make(recyclerView, "Syncing with server...", Snackbar.LENGTH_INDEFINITE).show();
+            }
+        });
+
+        viewModel.getSyncMessage().observe(this, message -> {
+            if (message != null && !message.isEmpty()) {
+                Snackbar.make(recyclerView, message, Snackbar.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private int dpToPx(int dp) {
+        float density = getResources().getDisplayMetrics().density;
+        return Math.round(dp * density);
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (isFabMenuOpen) {
+            closeFabMenu();
+        } else {
+            super.onBackPressed();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        recorder.stop();
+        player.stop();
+    }
+}
