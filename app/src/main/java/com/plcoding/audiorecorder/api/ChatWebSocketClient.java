@@ -19,21 +19,27 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class ChatWebSocketClient extends WebSocketClient {
     private static final String TAG = "ChatWebSocketClient";
     private static final int RECONNECT_DELAY = 5000; // 5 seconds
-    private static final int MAX_RECONNECT_ATTEMPTS = 5;
-    private static final int CONNECTION_TIMEOUT = 15000; // 15 seconds
 
     // Ping/pong timings - optimized
-    private static final long PING_INTERVAL = 20000; // 20 seconds (less than server's 30s)
-    private static final long PING_TIMEOUT = 8000; // 8 seconds
     private final Handler pingHandler = new Handler(Looper.getMainLooper());
     private boolean waitingForPong = false;
     private long lastPongTime = 0;
     private final AtomicBoolean isPinging = new AtomicBoolean(false);
 
+    // Add these constants for improved reliability
+    private static final int MAX_RECONNECT_ATTEMPTS = 3;
+    private static final int CONNECTION_TIMEOUT = 15000; // 15 seconds
+    private static final long PING_INTERVAL = 15000; // 15 seconds
+    private static final long PING_TIMEOUT = 5000; // 5 seconds
+
+    // Add this to track connection state better
+    private final AtomicBoolean isConnecting = new AtomicBoolean(false);
+    private volatile boolean manualClose = false;
+
     private final Runnable pingRunnable = new Runnable() {
         @Override
         public void run() {
-            if (isOpen() && !waitingForPong) {
+            if (isOpen() && !waitingForPong && !isClosing) {
                 try {
                     JSONObject pingMessage = new JSONObject();
                     pingMessage.put("message", "ping");
@@ -47,7 +53,7 @@ public class ChatWebSocketClient extends WebSocketClient {
 
                     // Set timeout for pong response
                     pingHandler.postDelayed(() -> {
-                        if (waitingForPong) {
+                        if (waitingForPong && !isClosing) {
                             Log.w(TAG, "Pong timeout - closing connection");
                             reconnectAfterError("Ping timeout");
                         }
@@ -58,8 +64,8 @@ public class ChatWebSocketClient extends WebSocketClient {
                 }
             }
 
-            // Continue ping cycle
-            if (isOpen() && !isClosing) {
+            // Continue ping cycle only if connection is still alive
+            if (isOpen() && !isClosing && !isClosingPermanently) {
                 pingHandler.postDelayed(this, PING_INTERVAL);
             }
         }
@@ -290,7 +296,6 @@ public class ChatWebSocketClient extends WebSocketClient {
             if (jsonMessage.has("pong") && jsonMessage.getBoolean("pong")) {
                 // Reset waitingForPong flag
                 waitingForPong = false;
-                lastPongTime = System.currentTimeMillis();
                 Log.d(TAG, "Received pong response from server");
                 return;
             }
@@ -302,9 +307,15 @@ public class ChatWebSocketClient extends WebSocketClient {
             String messageId = jsonMessage.optString("message_id", null);
             boolean isHistorical = jsonMessage.optBoolean("is_historical", false);
 
-            // Skip empty messages (a common issue we're fixing)
-            if (messageContent.trim().isEmpty() && !isHistorical) {
+            // Skip empty messages
+            if (messageContent.trim().isEmpty()) {
                 Log.d(TAG, "Skipping empty message from " + sender);
+                return;
+            }
+
+            // Skip ping/pong messages
+            if (messageContent.equalsIgnoreCase("ping") || messageContent.equalsIgnoreCase("pong")) {
+                Log.d(TAG, "Skipping ping/pong message");
                 return;
             }
 
@@ -364,6 +375,11 @@ public class ChatWebSocketClient extends WebSocketClient {
     private void reconnectAfterError(String reason) {
         Log.d(TAG, "Reconnect after error: " + reason);
 
+        // If it's a manual close, don't reconnect
+        if (isClosingPermanently || manualClose) {
+            return;
+        }
+
         // Close current connection if it's still open
         if (isOpen()) {
             try {
@@ -374,7 +390,7 @@ public class ChatWebSocketClient extends WebSocketClient {
             }
         }
 
-        // Attempt reconnect
+        // Attempt reconnect if under max attempts
         attemptReconnect();
     }
 
@@ -447,15 +463,14 @@ public class ChatWebSocketClient extends WebSocketClient {
     @Override
     public void close() {
         isClosing = true;
+        manualClose = true;
         stopPingPong();
         super.close();
     }
 
-    /**
-     * Use this method for permanent closure that should not attempt reconnect
-     */
     public void closePermanently() {
         isClosingPermanently = true;
+        manualClose = true;
         close();
     }
 

@@ -6,12 +6,15 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
 import android.util.Log;
+import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ProgressBar;
@@ -42,10 +45,11 @@ import java.util.concurrent.Executors;
 public class ChatActivity extends AppCompatActivity implements ChatWebSocketClient.MessageListener {
     private static final String TAG = "ChatActivity";
 
+    // Class members
     private RecyclerView chatRecyclerView;
     private ChatAdapter chatAdapter;
     private final List<ChatMessage> chatMessages = new ArrayList<>();
-    private final Set<String> messageIds = new HashSet<>(); // To track message IDs and prevent duplicates
+    private final Set<String> messageIds = new HashSet<>(); // Track message IDs
 
     private EditText messageInput;
     private Button sendButton;
@@ -55,12 +59,11 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
     private ProgressBar connectionProgress;
 
     private ChatWebSocketClient chatWebSocket;
+    // Declare test client as a class member to fix NullPointerException
     private ChatWebSocketClient testClient;
-
     private String recordingId;
     private String deviceId;
     private boolean isConnected = false;
-    private boolean isReconnecting = false;
     private int reconnectAttempts = 0;
 
     // Background thread management
@@ -73,6 +76,10 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
     private static final int STATE_CONNECTING = 1;
     private static final int STATE_CONNECTED = 2;
     private int connectionState = STATE_DISCONNECTED;
+
+    private static final int MAX_CONNECTION_ATTEMPTS = 5;
+    private boolean isConnecting = false;
+    private final Object connectionLock = new Object();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -101,7 +108,7 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         // Load local messages first
         loadLocalMessages();
 
-        // Verify that the recording exists, then proceed with connection
+        // Verify recording exists
         verifyRecordingExists(recordingId);
 
         // Register network receiver
@@ -117,7 +124,7 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         connectionStatus = findViewById(R.id.connection_status);
         connectionProgress = findViewById(R.id.connection_progress);
 
-        // Set up RecyclerView with stable IDs for better performance
+        // Set up RecyclerView
         LinearLayoutManager layoutManager = new LinearLayoutManager(this);
         layoutManager.setStackFromEnd(true);
         chatRecyclerView.setLayoutManager(layoutManager);
@@ -132,14 +139,10 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         Button retryButton = findViewById(R.id.retry_button);
         retryButton.setOnClickListener(v -> {
             // Reset connection attempts
-            isReconnecting = false;
             reconnectAttempts = 0;
 
             // Clear any existing connection
-            if (chatWebSocket != null) {
-                chatWebSocket.close();
-                chatWebSocket = null;
-            }
+            closeAllWebSockets();
 
             // Show connecting status
             showConnectionStatus(true, "Connecting...");
@@ -156,15 +159,6 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
                 messageInput.setText("");
             }
         });
-
-        // Handle "Enter" key press
-        messageInput.setOnEditorActionListener((v, actionId, event) -> {
-            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND) {
-                sendButton.performClick();
-                return true;
-            }
-            return false;
-        });
     }
 
     private void updateInputState(boolean enabled) {
@@ -179,18 +173,20 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         }
     }
 
+    private void showErrorAndFinish(String message) {
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        finish();
+    }
+
     private void verifyRecordingExists(String recordingId) {
         executor.execute(() -> {
             try {
-                // Use the RecordingRepository to check if the recording exists
                 RecordingRepository repository = new RecordingRepository(this);
                 Recording recording = repository.getRecording(Long.parseLong(recordingId));
 
                 if (recording == null) {
-                    // Recording doesn't exist, show error and finish activity
                     mainHandler.post(() -> showErrorAndFinish("Recording ID " + recordingId + " not found."));
                 } else {
-                    // Recording exists, proceed with connection
                     mainHandler.post(() -> {
                         // Set title to recording title
                         setTitle(recording.getTitle());
@@ -210,11 +206,6 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         });
     }
 
-    private void showErrorAndFinish(String message) {
-        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
-        finish();
-    }
-
     private void verifyServerConnectivity() {
         executor.execute(() -> {
             try {
@@ -224,7 +215,7 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
                 mainHandler.post(() -> {
                     if (isServerReachable) {
                         showConnectionStatus(true, "Connecting to chat...");
-                        testWebSocketConnection();
+                        connectWebSocketDirectly(); // Skip test connection, connect directly
                     } else {
                         showConnectionStatus(false, "Server not reachable");
                         addSystemMessage("Server not reachable. Please check your network connection.");
@@ -242,109 +233,26 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         });
     }
 
-    private void testWebSocketConnection() {
-        // Test echo WebSocket first to verify basic WebSocket connectivity
-        String echoUrl = "ws://" + getServerUrl() + "/ws/echo/";
-        Log.d(TAG, "Testing WebSocket connection to: " + echoUrl);
-
-        try {
-            // Create test client as class member variable
-            testClient = new ChatWebSocketClient(
-                    echoUrl,
-                    new ChatWebSocketClient.MessageListener() {
-                        @Override
-                        public void onMessageReceived(String sender, String message, String timestamp,
-                                                      String messageId, boolean isHistorical) {
-                            Log.d(TAG, "Echo test received: " + message);
-                            addSystemMessage("Test connection successful");
-
-                            // Now testClient is a class variable, accessible here
-                            try {
-                                testClient.close();
-                                testClient = null; // Clean up reference
-                            } catch (Exception e) {
-                                Log.e(TAG, "Error closing test client", e);
-                            }
-
-                            // Connect to actual chat after successful test
-                            mainHandler.postDelayed(() -> connectWebSocket(), 500);
-                        }
-
-                        @Override
-                        public void onTypingStarted() { }
-
-                        @Override
-                        public void onConnectionStateChange(boolean connected, String message) {
-                            if (connected) {
-                                addSystemMessage("Test connection established");
-                                // Send a test message
-                                try {
-                                    JSONObject testMessage = new JSONObject();
-                                    testMessage.put("message", "test");
-                                    testMessage.put("device_id", deviceId);
-                                    testClient.send(testMessage.toString());
-                                } catch (Exception e) {
-                                    Log.e(TAG, "Error sending test message", e);
-                                }
-                            } else {
-                                addSystemMessage("Test connection failed: " + message);
-                                // Try direct connection instead
-                                connectWebSocket();
-                            }
-                        }
-
-                        @Override
-                        public void onError(String errorMessage) {
-                            Log.e(TAG, "Echo test error: " + errorMessage);
-                            addSystemMessage("Test connection error: " + errorMessage);
-                            // Try direct connection after error
-                            connectWebSocket();
-                        }
-
-                        @Override
-                        public String getWebSocketUrl() {
-                            return null;
-                        }
-                    },
-                    deviceId,
-                    "test"
-            );
-
-            // Add headers
-            testClient.addHeader("User-Agent", "AndroidVoiceRecorder");
-            testClient.addHeader("X-Client-Type", "android_mobile");
-            testClient.addHeader("X-Device-ID", deviceId);
-
-            // Connect
-            testClient.connect();
-            addSystemMessage("Testing connection...");
-
-        } catch (Exception e) {
-            Log.e(TAG, "Error creating test client", e);
-            addSystemMessage("Error testing connection: " + e.getMessage());
-            // Try direct connection after error
-            connectWebSocket();
-        }
-    }
-
-    private void connectWebSocket() {
-        // Don't create multiple connections
-        if (connectionState == STATE_CONNECTING || connectionState == STATE_CONNECTED) {
-            return;
-        }
-
-        try {
-            // Close any existing connection
-            if (chatWebSocket != null) {
-                chatWebSocket.closePermanently();
-                chatWebSocket = null;
+    // Modified to connect directly instead of testing first
+    private void connectWebSocketDirectly() {
+        // Use synchronized to prevent multiple simultaneous connections
+        synchronized (connectionLock) {
+            // Don't try to connect if already connecting or if we've hit the max attempts
+            if (isConnecting || reconnectAttempts >= MAX_CONNECTION_ATTEMPTS) {
+                return;
             }
+
+            isConnecting = true;
+        }
+
+        try {
+            // Close any existing connections first
+            closeAllWebSockets();
 
             connectionState = STATE_CONNECTING;
             showConnectionStatus(true, "Connecting to chat...");
 
             String serverUrl = getServerUrl();
-            // Build WebSocket URL
             String chatUrl = String.format("ws://%s/ws/chat/%s/%s/",
                     serverUrl, deviceId, recordingId);
 
@@ -364,29 +272,39 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
             chatWebSocket.connect();
             Log.d(TAG, "WebSocket connect() called");
 
-            // Set connection timeout
+            // Set connection timeout - longer timeout for more reliability
             mainHandler.postDelayed(() -> {
                 if (connectionState != STATE_CONNECTED && chatWebSocket != null) {
                     Log.e(TAG, "WebSocket connection timed out");
+                    synchronized (connectionLock) {
+                        isConnecting = false;
+                    }
                     chatWebSocket.close();
                     connectionState = STATE_DISCONNECTED;
                     onConnectionStateChange(false, "Connection timeout");
                     scheduleReconnect();
                 }
-            }, 10000);
+            }, 15000); // 15 seconds timeout
 
         } catch (URISyntaxException e) {
             Log.e(TAG, "URI syntax error: " + e.getMessage(), e);
             connectionState = STATE_DISCONNECTED;
+            synchronized (connectionLock) {
+                isConnecting = false;
+            }
             showConnectionStatus(false, "Invalid URL: " + e.getMessage());
             addSystemMessage("Error connecting: " + e.getMessage());
         } catch (Exception e) {
             Log.e(TAG, "Error connecting to WebSocket: " + e.getMessage(), e);
             connectionState = STATE_DISCONNECTED;
+            synchronized (connectionLock) {
+                isConnecting = false;
+            }
             showConnectionStatus(false, "Error: " + e.getMessage());
             addSystemMessage("Error connecting: " + e.getMessage());
         }
     }
+
 
     private void scheduleReconnect() {
         if (isFinishing() || isDestroyed()) {
@@ -394,14 +312,19 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         }
 
         reconnectAttempts++;
-        int delay = Math.min(30000, 1000 * (int) Math.pow(2, Math.min(reconnectAttempts, 5)));
 
-        Log.d(TAG, "Scheduling reconnect attempt #" + reconnectAttempts + " in " + delay + "ms");
+        // Calculate delay with exponential backoff, max 60 seconds
+        int delay = Math.min(60000, 1000 * (int) Math.pow(2, Math.min(reconnectAttempts, 6)));
+
+        Log.d(TAG, "Scheduling reconnect attempt #" + reconnectAttempts + " in " + (delay / 1000) + " seconds");
         addSystemMessage("Will retry connection in " + (delay / 1000) + " seconds...");
 
+        // Use the regular postDelayed which works on all Android versions
         mainHandler.postDelayed(() -> {
-            if (!isFinishing() && !isDestroyed()) {
-                verifyServerConnectivity();
+            synchronized (connectionLock) {
+                if (!isFinishing() && !isDestroyed() && !isConnecting && connectionState == STATE_DISCONNECTED) {
+                    verifyServerConnectivity();
+                }
             }
         }, delay);
     }
@@ -436,15 +359,14 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
     }
 
     private void addMessageToChat(ChatMessage message) {
-        // Check for duplicates by ID
-        if (message.getMessageId() != null && messageIds.contains(message.getMessageId())) {
-            // Skip duplicate message
+        // Skip unnecessary messages to prevent chat pollution
+        if (shouldSkipMessage(message)) {
             return;
         }
 
-        // Ignore empty messages
-        if (TextUtils.isEmpty(message.getMessage()) && message.getType() != ChatMessage.TYPE_SYSTEM) {
-            return;
+        // Check for duplicates by ID
+        if (message.getMessageId() != null && messageIds.contains(message.getMessageId())) {
+            return; // Skip duplicate message
         }
 
         // Add message and update UI
@@ -458,6 +380,22 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         }
     }
 
+    // Added method to filter out ping/pong messages
+    private boolean shouldSkipMessage(ChatMessage message) {
+        // Skip empty messages
+        if (TextUtils.isEmpty(message.getMessage()) && message.getType() != ChatMessage.TYPE_SYSTEM) {
+            return true;
+        }
+
+        // Skip ping/pong messages
+        String msgText = message.getMessage().toLowerCase();
+        if (msgText.equals("ping") || msgText.equals("pong")) {
+            return true;
+        }
+
+        return false;
+    }
+
     private void addSystemMessage(String message) {
         ChatMessage systemMessage = new ChatMessage(
                 message,
@@ -467,7 +405,13 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
                 null,
                 false
         );
-        addMessageToChat(systemMessage);
+
+        // Always update on the main thread
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            addMessageToChat(systemMessage);
+        } else {
+            mainHandler.post(() -> addMessageToChat(systemMessage));
+        }
     }
 
     private String getCurrentTimestamp() {
@@ -574,8 +518,13 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
                         addSystemMessage("Loading local message history...");
 
                         for (LocalChatMessage msg : localMessages) {
-                            // Skip empty messages
+                            // Skip empty messages and ping/pong messages
                             if (TextUtils.isEmpty(msg.getMessage())) {
+                                continue;
+                            }
+
+                            String messageText = msg.getMessage().toLowerCase();
+                            if (messageText.equals("ping") || messageText.equals("pong")) {
                                 continue;
                             }
 
@@ -615,6 +564,12 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
                                   String messageId, boolean isHistorical) {
         // Skip empty messages
         if (TextUtils.isEmpty(message)) {
+            return;
+        }
+
+        // Skip ping/pong messages
+        String msgLower = message.toLowerCase();
+        if (msgLower.equals("ping") || msgLower.equals("pong")) {
             return;
         }
 
@@ -689,27 +644,39 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
 
         mainHandler.post(() -> {
             if (connected) {
+                synchronized (connectionLock) {
+                    isConnecting = false;
+                    reconnectAttempts = 0; // Reset on successful connection
+                }
                 connectionState = STATE_CONNECTED;
                 isConnected = true;
                 hideConnectionStatus();
                 addSystemMessage("Connected to chat");
                 updateInputState(true);
-                reconnectAttempts = 0; // Reset on successful connection
+
+                // Cancel any pending reconnection attempts
+                mainHandler.removeCallbacksAndMessages(null);
 
                 // Send any queued messages
                 if (!queuedMessages.isEmpty()) {
                     sendQueuedMessages();
                 }
             } else {
+                synchronized (connectionLock) {
+                    isConnecting = false;
+                }
                 connectionState = STATE_DISCONNECTED;
                 isConnected = false;
                 showConnectionStatus(false, message);
                 updateInputState(false);
                 addSystemMessage("Disconnected: " + message);
 
-                // Don't reconnect if it's an auth failure or explicit close
-                if (!isFinishing() && !message.contains("403") && !message.contains("Authentication")) {
+                // Don't reconnect if it's an auth failure, explicit close, or if already at max attempts
+                if (!isFinishing() && !message.contains("403") && !message.contains("Authentication") &&
+                        reconnectAttempts < MAX_CONNECTION_ATTEMPTS) {
                     scheduleReconnect();
+                } else if (reconnectAttempts >= MAX_CONNECTION_ATTEMPTS) {
+                    showConnectionStatus(false, "Max reconnection attempts reached. Please try again later.");
                 }
             }
         });
@@ -778,14 +745,18 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         super.onResume();
 
         // Check if we need to reconnect
-        if (connectionState == STATE_DISCONNECTED && !isReconnecting) {
+        if (connectionState == STATE_DISCONNECTED) {
             verifyServerConnectivity();
         }
     }
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
+        // Cancel all pending reconnection attempts
+        mainHandler.removeCallbacksAndMessages(null);
+
+        // Close connections
+        closeAllWebSockets();
 
         // Unregister network receiver
         try {
@@ -794,19 +765,24 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
             Log.e(TAG, "Error unregistering network receiver", e);
         }
 
-        // Close WebSockets
-        if (testClient != null) {
-            testClient.closePermanently();
-            testClient = null;
-        }
-
-        if (chatWebSocket != null) {
-            chatWebSocket.closePermanently();
-            chatWebSocket = null;
-        }
-
         // Shutdown executor
         executor.shutdownNow();
+
+        super.onDestroy();
+    }
+
+    // Helper method to close all WebSockets
+    private void closeAllWebSockets() {
+        // Close chat client if exists
+        if (chatWebSocket != null) {
+            try {
+                ChatWebSocketClient clientToClose = chatWebSocket;
+                chatWebSocket = null; // Clear reference first to avoid callbacks using it
+                clientToClose.closePermanently();
+            } catch (Exception e) {
+                Log.e(TAG, "Error closing chat client", e);
+            }
+        }
     }
 }
 
@@ -818,7 +794,12 @@ class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.ChatViewHolder> {
 
     public ChatAdapter(List<ChatMessage> messages) {
         this.messages = messages;
-        setHasStableIds(true); // Add this line
+        setHasStableIds(true); // Enable stable IDs for better performance
+    }
+
+    @Override
+    public int getItemViewType(int position) {
+        return messages.get(position).getType();
     }
 
     @Override
@@ -836,21 +817,16 @@ class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.ChatViewHolder> {
     }
 
     @Override
-    public int getItemViewType(int position) {
-        return messages.get(position).getType();
-    }
-
-    @Override
-    public ChatViewHolder onCreateViewHolder(android.view.ViewGroup parent, int viewType) {
+    public ChatViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
         View view;
         if (viewType == ChatMessage.TYPE_ADMIN) {
-            view = android.view.LayoutInflater.from(parent.getContext())
+            view = LayoutInflater.from(parent.getContext())
                     .inflate(R.layout.item_message_admin, parent, false);
         } else if (viewType == ChatMessage.TYPE_SYSTEM) {
-            view = android.view.LayoutInflater.from(parent.getContext())
+            view = LayoutInflater.from(parent.getContext())
                     .inflate(R.layout.item_message_system, parent, false);
         } else {
-            view = android.view.LayoutInflater.from(parent.getContext())
+            view = LayoutInflater.from(parent.getContext())
                     .inflate(R.layout.item_message_device, parent, false);
         }
         return new ChatViewHolder(view);
@@ -860,7 +836,7 @@ class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.ChatViewHolder> {
     public void onBindViewHolder(ChatViewHolder holder, int position) {
         ChatMessage message = messages.get(position);
 
-        // Set the message text - THIS LINE IS MISSING
+        // THIS CRUCIAL LINE WAS MISSING - Set the message text
         holder.messageText.setText(message.getMessage());
 
         // Set the background and alignment based on message type
@@ -890,14 +866,12 @@ class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.ChatViewHolder> {
                 break;
         }
 
-        // Add message ID indicator if available (for debugging only - can be removed in production)
-        if (message.getMessageId() != null) {
+        // Add message ID indicator if in debug mode (can be removed in production)
+        if (BuildConfig.DEBUG && message.getMessageId() != null) {
             String currentInfo = holder.infoText.getText().toString();
             holder.infoText.setText(currentInfo + " · ID:" + message.getMessageId());
         }
     }
-
-
 
     @Override
     public int getItemCount() {
@@ -914,7 +888,6 @@ class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.ChatViewHolder> {
             infoText = itemView.findViewById(R.id.info_text);
         }
     }
-
 
 }
 
