@@ -2,9 +2,10 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
+
     <item
-        android:id="@+id/action_sync"
-        android:icon="@drawable/ic_sync"
-        android:title="Sync"
-        app:showAsAction="ifRoom" />
+        android:id="@+id/nav_chat"
+        android:icon="@drawable/ic_add"
+        android:title="Chat" />
+
 </menu>

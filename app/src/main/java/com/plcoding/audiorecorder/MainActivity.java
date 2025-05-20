@@ -1,14 +1,27 @@
 package com.plcoding.audiorecorder;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
+import android.app.ProgressDialog;
+import android.content.Intent;
+import android.graphics.Color;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.InputType;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewTreeObserver;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 import android.widget.Toast;
+
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.lifecycle.ViewModelProvider;
@@ -18,12 +31,17 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.android.material.snackbar.Snackbar;
 import com.google.android.material.textfield.TextInputEditText;
-import com.plcoding.audiorecorder.data.Recording;
+import com.plcoding.audiorecorder.api.RetrofitClient;
+import com.plcoding.audiorecorder.data.RecordingRepository;
 import com.plcoding.audiorecorder.playback.AndroidAudioPlayer;
 import com.plcoding.audiorecorder.record.AndroidAudioRecorder;
 import com.plcoding.audiorecorder.ui.theme.RecordingAdapter;
 import com.plcoding.audiorecorder.ui.theme.RecordingViewModel;
 import com.plcoding.audiorecorder.utils.DraggableButtonHelper;
+import com.plcoding.audiorecorder.data.Recording;
+
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
     private AndroidAudioRecorder recorder;
@@ -43,6 +61,9 @@ public class MainActivity extends AppCompatActivity {
     private DraggableButtonHelper draggableHelper;
     private static final String TAG = "MainActivity";
 
+    // For background operations
+    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -64,16 +85,15 @@ public class MainActivity extends AppCompatActivity {
         );
         viewModel = new ViewModelProvider(this, factory).get(RecordingViewModel.class);
 
-        // Request permissions
-        ActivityCompat.requestPermissions(
-                this,
-                new String[]{
-                        Manifest.permission.RECORD_AUDIO,
-                        Manifest.permission.INTERNET,
-                        Manifest.permission.ACCESS_NETWORK_STATE
-                },
-                0
-        );
+        // Try to sync any pending uploads
+        // After your existing initialization code
+        TextView networkStatusText = findViewById(R.id.network_status);
+
+        // Check network status - PROPERLY USING BACKGROUND THREAD
+        checkServerConnection(networkStatusText);
+
+        // Request permissions including storage for Android 10 and below
+        requestNecessaryPermissions();
 
         // Setup RecyclerView
         setupRecyclerView();
@@ -91,23 +111,191 @@ public class MainActivity extends AppCompatActivity {
         setupDynamicPadding();
     }
 
+    /**
+     * Request all necessary permissions based on Android version
+     */
+    private void requestNecessaryPermissions() {
+        String[] permissions;
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            permissions = new String[]{
+                    Manifest.permission.RECORD_AUDIO,
+                    Manifest.permission.READ_MEDIA_AUDIO,
+                    Manifest.permission.INTERNET,
+                    Manifest.permission.ACCESS_NETWORK_STATE
+            };
+        } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            permissions = new String[]{
+                    Manifest.permission.RECORD_AUDIO,
+                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.INTERNET,
+                    Manifest.permission.ACCESS_NETWORK_STATE
+            };
+        } else {
+            permissions = new String[]{
+                    Manifest.permission.RECORD_AUDIO,
+                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                    Manifest.permission.INTERNET,
+                    Manifest.permission.ACCESS_NETWORK_STATE
+            };
+        }
+
+        ActivityCompat.requestPermissions(this, permissions, 0);
+    }
+
+    /**
+     * Check server connection using background thread
+     */
+    private void checkServerConnection(TextView networkStatusText) {
+        // Set initial status
+        networkStatusText.setText("Checking...");
+        networkStatusText.setTextColor(Color.GRAY);
+
+        // Use executor service to run network operations on background thread
+        executor.execute(() -> {
+            boolean isServerAvailable = false;
+            String errorMessage = null;
+
+            try {
+                Log.d(TAG, "Testing server connection...");
+
+                // Try different methods to connect to server
+                RetrofitClient client = RetrofitClient.getInstance(MainActivity.this);
+
+                // First try HTTP connection
+                isServerAvailable = client.isServerReachable();
+                Log.d(TAG, "HTTP check result: " + isServerAvailable);
+
+                // If HTTP fails, try socket connection
+                if (!isServerAvailable) {
+                    isServerAvailable = client.pingServer();
+                    Log.d(TAG, "Socket check result: " + isServerAvailable);
+                }
+
+                Log.d(TAG, "Server available: " + isServerAvailable);
+            } catch (Exception e) {
+                Log.e(TAG, "Error checking server connection", e);
+                errorMessage = e.getMessage();
+            }
+
+            // Need final variables for lambda
+            final boolean finalIsServerAvailable = isServerAvailable;
+            final String finalErrorMessage = errorMessage;
+
+            // Update UI on main thread
+            mainHandler.post(() -> {
+                if (finalIsServerAvailable) {
+                    networkStatusText.setText("Online");
+                    networkStatusText.setTextColor(Color.GREEN);
+                    // If online, try to sync pending uploads
+                    trySyncPendingUploads();
+                } else {
+                    networkStatusText.setText("Offline");
+                    networkStatusText.setTextColor(Color.RED);
+
+                    // Show toast with better error message
+                    String message = "Server unavailable. Check your network connection or server status.";
+                    if (finalErrorMessage != null) {
+                        message += " Error: " + finalErrorMessage;
+                    }
+                    Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
+
+                    // Show dialog with server configuration option
+                    offerServerConfiguration();
+                }
+            });
+        });
+    }
+
+    private void offerServerConfiguration() {
+        new AlertDialog.Builder(this)
+                .setTitle("Server Connection Failed")
+                .setMessage("Unable to connect to the server. Would you like to update the server configuration?")
+                .setPositiveButton("Configure Server", (dialog, which) -> {
+                    // Open server configuration
+                    Intent intent = new Intent(MainActivity.this, ServerConfigActivity.class);
+                    startActivity(intent);
+                })
+                .setNegativeButton("Try Again", (dialog, which) -> {
+                    // Retry connection
+                    TextView networkStatusText = findViewById(R.id.network_status);
+                    checkServerConnection(networkStatusText);
+                })
+                .setNeutralButton("Cancel", null)
+                .show();
+    }
+
+    /**
+     * Try to sync any pending uploads
+     */
+    private void trySyncPendingUploads() {
+        executor.execute(() -> {
+            try {
+                RecordingRepository repository = new RecordingRepository(MainActivity.this);
+                int pendingCount = repository.getPendingUploadsCount();
+
+                if (pendingCount > 0) {
+                    mainHandler.post(() -> {
+                        Snackbar.make(recyclerView,
+                                "Found " + pendingCount + " pending uploads. Syncing...",
+                                Snackbar.LENGTH_LONG).show();
+                    });
+
+                    repository.syncPendingUploads(null);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error syncing pending uploads", e);
+            }
+        });
+    }
+
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         getMenuInflater().inflate(R.menu.main_menu, menu);
         return true;
     }
 
-    @Override
-    public boolean onOptionsItemSelected(MenuItem item) {
-        if (item.getItemId() == R.id.action_sync) {
-            syncRecordings();
-            return true;
-        }
-        return super.onOptionsItemSelected(item);
-    }
+    /**
+     * Force sync all pending uploads
+     */
+    private void forceSyncAll() {
+        Snackbar syncingSnackbar = Snackbar.make(recyclerView,
+                "Syncing all recordings...", Snackbar.LENGTH_INDEFINITE);
+        syncingSnackbar.show();
 
-    private void syncRecordings() {
-        viewModel.syncWithServer();
+        executor.execute(() -> {
+            try {
+                RecordingRepository repository = new RecordingRepository(MainActivity.this);
+                repository.forceUploadPending(new RecordingRepository.OperationCallback() {
+                    @Override
+                    public void onSuccess() {
+                        mainHandler.post(() -> {
+                            syncingSnackbar.dismiss();
+                            Snackbar.make(recyclerView,
+                                    "Sync completed successfully",
+                                    Snackbar.LENGTH_SHORT).show();
+                        });
+                    }
+
+                    @Override
+                    public void onError(String errorMessage) {
+                        mainHandler.post(() -> {
+                            syncingSnackbar.dismiss();
+                            Snackbar.make(recyclerView,
+                                    "Sync error: " + errorMessage,
+                                    Snackbar.LENGTH_LONG).show();
+                        });
+                    }
+                });
+            } catch (Exception e) {
+                mainHandler.post(() -> {
+                    syncingSnackbar.dismiss();
+                    Snackbar.make(recyclerView,
+                            "Sync error: " + e.getMessage(),
+                            Snackbar.LENGTH_LONG).show();
+                });
+            }
+        });
     }
 
     private void initializeViews() {
@@ -116,6 +304,16 @@ public class MainActivity extends AppCompatActivity {
         fabVoice = findViewById(R.id.fab_voice);
         fabText = findViewById(R.id.fab_text);
         overlay = findViewById(R.id.overlay);
+
+        // Initialize conversations button
+        Button conversationsButton = findViewById(R.id.conversations_button);
+
+        // Set click listener for the conversations button
+        conversationsButton.setOnClickListener(v -> {
+            // Navigate to Conversations Activity
+            Intent intent = new Intent(MainActivity.this, ConversationsActivity.class);
+            startActivity(intent);
+        });
     }
 
     private void setupRecyclerView() {
@@ -129,7 +327,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                 },
                 recording -> viewModel.stopPlayback(),
-                recording -> showDeleteConfirmation(recording)
+                this::showDeleteConfirmation
         );
         recyclerView.setAdapter(adapter);
     }
@@ -156,12 +354,7 @@ public class MainActivity extends AppCompatActivity {
         draggableHelper.makeDraggable(fabMain, null);
 
         // Add listener to update RecyclerView padding when FAB is moved
-        fabMain.getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
-            @Override
-            public void onGlobalLayout() {
-                updateRecyclerViewPadding();
-            }
-        });
+        fabMain.getViewTreeObserver().addOnGlobalLayoutListener(this::updateRecyclerViewPadding);
     }
 
     private void setupDynamicPadding() {
@@ -175,7 +368,6 @@ public class MainActivity extends AppCompatActivity {
         fabMain.getLocationOnScreen(location);
         int fabTop = location[1];
         int fabHeight = fabMain.getHeight();
-        int fabBottom = fabTop + fabHeight;
 
         // Get screen dimensions
         int screenHeight = getResources().getDisplayMetrics().heightPixels;
@@ -278,6 +470,7 @@ public class MainActivity extends AppCompatActivity {
                 .start();
     }
 
+    @SuppressLint("UseCompatLoadingForColorStateLists")
     private void startVoiceRecording() {
         viewModel.startRecording();
         isRecording = true;
@@ -289,6 +482,7 @@ public class MainActivity extends AppCompatActivity {
         Toast.makeText(this, "Recording started", Toast.LENGTH_SHORT).show();
     }
 
+    @SuppressLint("UseCompatLoadingForColorStateLists")
     private void stopVoiceRecording() {
         viewModel.stopRecording();
         isRecording = false;
@@ -305,7 +499,7 @@ public class MainActivity extends AppCompatActivity {
         TextInputEditText editText = view.findViewById(R.id.text_input);
 
         if (editText == null) {
-            Log.e("MainActivity", "EditText not found in dialog layout");
+            Log.e(TAG, "EditText not found in dialog layout");
             Toast.makeText(this, "Error: Input field not found", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -315,20 +509,20 @@ public class MainActivity extends AppCompatActivity {
                 .setView(view)
                 .setPositiveButton("Save", (dialog, which) -> {
                     if (editText.getText() == null) {
-                        Log.e("MainActivity", "EditText.getText() returned null");
+                        Log.e(TAG, "EditText.getText() returned null");
                         Toast.makeText(this, "Error: Could not get text", Toast.LENGTH_SHORT).show();
                         return;
                     }
 
                     String text = editText.getText().toString().trim();
-                    Log.d("MainActivity", "Text to save: '" + text + "'");
+                    Log.d(TAG, "Text to save: '" + text + "'");
 
                     if (!text.isEmpty()) {
-                        Log.d("MainActivity", "Calling viewModel.saveTextRecording");
+                        Log.d(TAG, "Calling viewModel.saveTextRecording");
                         viewModel.saveTextRecording(text);
                         Toast.makeText(this, "Text note saved", Toast.LENGTH_SHORT).show();
                     } else {
-                        Log.w("MainActivity", "Text is empty");
+                        Log.w(TAG, "Text is empty");
                         Toast.makeText(this, "Text cannot be empty", Toast.LENGTH_SHORT).show();
                     }
                 })
@@ -407,5 +601,7 @@ public class MainActivity extends AppCompatActivity {
         super.onDestroy();
         recorder.stop();
         player.stop();
+        // Shut down the executor to prevent memory leaks
+        executor.shutdown();
     }
 }

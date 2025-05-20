@@ -8,7 +8,8 @@ import android.util.Log;
 public class RecordingDatabase extends SQLiteOpenHelper {
     private static final String TAG = "RecordingDatabase";
     private static final String DATABASE_NAME = "recordings.db";
-    private static final int DATABASE_VERSION = 4; // Increment version to add device_id
+    // Increase version from 4 to 5 to match existing database
+    private static final int DATABASE_VERSION = 5;
 
     // Table name
     public static final String TABLE_RECORDINGS = "recordings";
@@ -29,6 +30,7 @@ public class RecordingDatabase extends SQLiteOpenHelper {
 
     @Override
     public void onCreate(SQLiteDatabase db) {
+        // Create recordings table
         String createTableQuery = "CREATE TABLE " + TABLE_RECORDINGS + " (" +
                 COLUMN_ID + " INTEGER PRIMARY KEY AUTOINCREMENT, " +
                 COLUMN_TITLE + " TEXT NOT NULL, " +
@@ -42,6 +44,20 @@ public class RecordingDatabase extends SQLiteOpenHelper {
         Log.d(TAG, "Creating table with query: " + createTableQuery);
         db.execSQL(createTableQuery);
         Log.d(TAG, "Table created successfully");
+
+        // Create chat messages table
+        String createChatTableQuery = "CREATE TABLE chat_messages (" +
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                "recording_id INTEGER NOT NULL, " +
+                "message TEXT NOT NULL, " +
+                "is_from_device INTEGER NOT NULL, " +
+                "timestamp INTEGER NOT NULL, " +
+                "is_synced INTEGER NOT NULL DEFAULT 0, " +
+                "message_id TEXT)";
+
+        Log.d(TAG, "Creating chat messages table with query: " + createChatTableQuery);
+        db.execSQL(createChatTableQuery);
+        Log.d(TAG, "Chat messages table created successfully");
     }
 
     @Override
@@ -102,6 +118,44 @@ public class RecordingDatabase extends SQLiteOpenHelper {
                 onCreate(db);
             }
         }
+
+        // Add migration for version 5
+        if (oldVersion < 5) {
+            // Handle migration from version 4 to 5
+            // If there are no schema changes in version 5, we can just log it
+            Log.d(TAG, "Migration to version 5 - no schema changes required");
+            // If version 5 did have schema changes, you would add them here
+            // For example:
+            // db.execSQL("ALTER TABLE " + TABLE_RECORDINGS + " ADD COLUMN NEW_COLUMN TEXT");
+        }
+
+        if (oldVersion < 6) {
+            try {
+                String createChatTableQuery = "CREATE TABLE IF NOT EXISTS chat_messages (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                        "recording_id INTEGER NOT NULL, " +
+                        "message TEXT NOT NULL, " +
+                        "is_from_device INTEGER NOT NULL, " +
+                        "timestamp INTEGER NOT NULL, " +
+                        "is_synced INTEGER NOT NULL DEFAULT 0)";
+
+                db.execSQL(createChatTableQuery);
+                Log.d(TAG, "Added chat_messages table");
+            } catch (Exception e) {
+                Log.e(TAG, "Error upgrading to version 6", e);
+            }
+        }
+    }
+
+    // Add onDowngrade method to handle database downgrades gracefully
+    @Override
+    public void onDowngrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+        // Log the downgrade attempt
+        Log.w(TAG, "Downgrading database from version " + oldVersion + " to " + newVersion + " - attempting to handle gracefully");
+
+        // For a production app, you might want to handle this more carefully
+        // This is a simple solution that maintains the existing database
+        // without attempting any schema changes
     }
 
     private boolean columnExists(SQLiteDatabase db, String tableName, String columnName) {

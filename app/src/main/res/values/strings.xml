@@ -10,4 +10,37 @@
     <string name="enter_text">Enter Text Note</string>
     <string name="save">Save</string>
     <string name="cancel">Cancel</string>
+
+    <!-- Chat Activity Strings -->
+    <string name="send">Send</string>
+    <string name="type_message">Type a message…</string>
+    <string name="admin_typing">Admin is typing…</string>
+    <string name="error_no_recording_id">Error: No recording ID provided</string>
+    <string name="connected_to_chat">Connected to chat server</string>
+    <string name="disconnected_from_chat">Disconnected from chat server</string>
+    <string name="error_connecting">Error connecting to chat server</string>
+    <string name="sender_timestamp_format">%1$s - %2$s</string>
+
+
+
+
+    <string name="message_hint">Type a message…</string>
+    <string name="is_typing">is typing…</string>
+    <string name="chat_title">Chat</string>
+
+    <string name="type_message_hint">Type a message…</string>
+    <string name="waiting_for_connection">Waiting for connection…</string>
+
+    <string name="error_not_connected">Not connected to chat server</string>
+    <string name="connecting_to_chat">Connecting to chat…</string>
+    <string name="testing_connection">Testing server connection…</string>
+    <string name="error_connecting_to_server">Could not connect to server</string>
+    <string name="error_invalid_server_url">Invalid server URL</string>
+    <string name="connected_to_server">Connected to server</string>
+    <string name="test_connection_successful">Test connection successful</string>
+    <string name="error_from_server">Error from server</string>
+    <string name="retry">Retry</string>
+    <string name="type_a_message">Type a message…</string>
+    <string name="admin_is_typing">Admin is typing…</string>
+
 </resources>

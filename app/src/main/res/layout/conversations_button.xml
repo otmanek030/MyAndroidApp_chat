@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <!-- Add a Conversations Button to the MainActivity layout -->
+    <!-- This would be added to the existing activity_main.xml layout file -->
+
+    <Button
+        android:id="@+id/conversations_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="My Conversations"
+        android:drawableStart="@drawable/ic_chat"
+        android:padding="12dp"
+        android:layout_margin="16dp"
+        android:backgroundTint="@color/colorPrimary"
+        android:textColor="@android:color/white"
+        app:layout_constraintTop_toBottomOf="@id/network_status"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+         tools:ignore="NotSibling" />
+
+    <!-- You would need to add this icon to your drawable resources -->
+
+</androidx.constraintlayout.widget.ConstraintLayout>
