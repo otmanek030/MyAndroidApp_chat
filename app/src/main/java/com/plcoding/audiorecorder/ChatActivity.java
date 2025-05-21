@@ -81,6 +81,9 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
     private boolean isConnecting = false;
     private final Object connectionLock = new Object();
 
+    private boolean initialHistoryLoaded = false;
+
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -364,9 +367,23 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
             return;
         }
 
-        // Check for duplicates by ID
+        // Check for duplicates by ID (improved version)
         if (message.getMessageId() != null && messageIds.contains(message.getMessageId())) {
+            Log.d(TAG, "Skipping duplicate message with ID: " + message.getMessageId());
             return; // Skip duplicate message
+        }
+
+        // Check for duplicate content (for messages without IDs)
+        if (message.getMessageId() == null) {
+            // Look for similar message content in recent messages
+            for (int i = Math.max(0, chatMessages.size() - 10); i < chatMessages.size(); i++) {
+                ChatMessage existing = chatMessages.get(i);
+                if (existing.getMessage().equals(message.getMessage()) &&
+                        existing.getType() == message.getType()) {
+                    Log.d(TAG, "Skipping duplicate message content: " + message.getMessage());
+                    return; // Skip duplicate content
+                }
+            }
         }
 
         // Add message and update UI
@@ -396,7 +413,38 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         return false;
     }
 
+    private final List<String> recentSystemMessages = new ArrayList<>();
+    private static final int MAX_RECENT_SYSTEM_MESSAGES = 10;
+
+    private boolean isRepeatedSystemMessage(String message) {
+        // Check if this is a repetitive system message we should filter
+        if (message.contains("Connected to chat") ||
+                message.contains("Connecting to chat") ||
+                message.contains("Local message history loaded")) {
+
+            // Check if we've seen this message recently
+            if (recentSystemMessages.contains(message)) {
+                return true;
+            }
+
+            // Add to our tracking list
+            recentSystemMessages.add(message);
+            if (recentSystemMessages.size() > MAX_RECENT_SYSTEM_MESSAGES) {
+                recentSystemMessages.remove(0);
+            }
+        }
+
+        return false;
+    }
+
+    // Then modify the addSystemMessage method:
     private void addSystemMessage(String message) {
+        // Filter out repetitive system messages
+        if (isRepeatedSystemMessage(message)) {
+            Log.d(TAG, "Filtered repeated system message: " + message);
+            return;
+        }
+
         ChatMessage systemMessage = new ChatMessage(
                 message,
                 ChatMessage.TYPE_SYSTEM,
@@ -515,7 +563,8 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
 
                 if (!localMessages.isEmpty()) {
                     mainHandler.post(() -> {
-                        addSystemMessage("Loading local message history...");
+                        // Only show one system message about loading history
+                        addSystemMessage("Local message history loaded");
 
                         for (LocalChatMessage msg : localMessages) {
                             // Skip empty messages and ping/pong messages
@@ -528,7 +577,7 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
                                 continue;
                             }
 
-                            // Skip messages we already have
+                            // Skip messages we already have by ID
                             if (msg.getMessageId() != null && messageIds.contains(msg.getMessageId())) {
                                 continue;
                             }
@@ -549,8 +598,6 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
                                 messageIds.add(msg.getMessageId());
                             }
                         }
-
-                        addSystemMessage("Local message history loaded.");
                     });
                 }
             } catch (Exception e) {
@@ -573,6 +620,20 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
             return;
         }
 
+        // Filter repetitive system messages
+        if (sender.equals("system")) {
+            // Skip "Loaded X messages" system messages if we've already loaded history once
+            if (message.contains("Loaded") && message.contains("messages from history") && initialHistoryLoaded) {
+                Log.d(TAG, "Skipping duplicate history message");
+                return;
+            }
+
+            // If this is a "Loaded X messages" system message, mark that we've loaded history
+            if (message.contains("Loaded") && message.contains("messages from history")) {
+                initialHistoryLoaded = true;
+            }
+        }
+
         mainHandler.post(() -> {
             int messageType;
             String displaySender;
@@ -588,8 +649,9 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
                 displaySender = deviceId.equals(sender) ? "You" : sender;
             }
 
-            // Check for duplicate messages
+            // Check for duplicate messages by ID
             if (messageId != null && messageIds.contains(messageId)) {
+                Log.d(TAG, "Skipping duplicate message with ID: " + messageId);
                 return; // Skip duplicates
             }
 
@@ -757,6 +819,10 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
 
         // Close connections
         closeAllWebSockets();
+
+        // Reset state variables
+        initialHistoryLoaded = false;
+        recentSystemMessages.clear();
 
         // Unregister network receiver
         try {

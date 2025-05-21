@@ -12,8 +12,10 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ChatWebSocketClient extends WebSocketClient {
@@ -31,6 +33,10 @@ public class ChatWebSocketClient extends WebSocketClient {
     private static final int CONNECTION_TIMEOUT = 15000; // 15 seconds
     private static final long PING_INTERVAL = 15000; // 15 seconds
     private static final long PING_TIMEOUT = 5000; // 5 seconds
+
+    private final Set<String> recentMessageIds = new HashSet<>();
+
+
 
     // Add this to track connection state better
     private final AtomicBoolean isConnecting = new AtomicBoolean(false);
@@ -70,6 +76,27 @@ public class ChatWebSocketClient extends WebSocketClient {
             }
         }
     };
+
+    private boolean isDuplicateMessage(JSONObject jsonMessage) {
+        try {
+            String messageId = jsonMessage.optString("message_id", null);
+            if (messageId != null && recentMessageIds.contains(messageId)) {
+                return true;
+            }
+
+            // Keep a small cache of recent message IDs
+            if (messageId != null) {
+                recentMessageIds.add(messageId);
+                if (recentMessageIds.size() > 100) {
+                    recentMessageIds.remove(0);  // Keep the set from growing too large
+                }
+            }
+
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
 
     public interface MessageListener {
         void onMessageReceived(String sender, String message, String timestamp,
@@ -297,6 +324,12 @@ public class ChatWebSocketClient extends WebSocketClient {
                 // Reset waitingForPong flag
                 waitingForPong = false;
                 Log.d(TAG, "Received pong response from server");
+                return;
+            }
+
+            // Check for duplicate messages
+            if (isDuplicateMessage(jsonMessage)) {
+                Log.d(TAG, "Skipping duplicate WebSocket message");
                 return;
             }
 
