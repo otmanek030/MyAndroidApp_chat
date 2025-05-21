@@ -98,6 +98,7 @@ public class ChatWebSocketClient extends WebSocketClient {
         }
     }
 
+
     public interface MessageListener {
         void onMessageReceived(String sender, String message, String timestamp,
                                String messageId, boolean isHistorical);

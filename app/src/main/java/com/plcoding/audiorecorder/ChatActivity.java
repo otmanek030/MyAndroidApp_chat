@@ -105,6 +105,9 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
 
         Log.d(TAG, "Activity started with deviceId: " + deviceId + ", recordingId: " + recordingId);
 
+
+        initialHistoryLoaded = false;
+
         // Initialize views
         initializeViews();
 
@@ -362,21 +365,27 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
     }
 
     private void addMessageToChat(ChatMessage message) {
-        // Skip unnecessary messages to prevent chat pollution
+        // Skip unnecessary messages
         if (shouldSkipMessage(message)) {
             return;
         }
 
         // Check for duplicates by ID (improved version)
-        if (message.getMessageId() != null && messageIds.contains(message.getMessageId())) {
-            Log.d(TAG, "Skipping duplicate message with ID: " + message.getMessageId());
-            return; // Skip duplicate message
+        if (message.getMessageId() != null) {
+            if (messageIds.contains(message.getMessageId()) ||
+                    processedMessageIds.contains(message.getMessageId())) {
+                Log.d(TAG, "Skipping duplicate message with ID: " + message.getMessageId());
+                return; // Skip duplicate message
+            }
         }
 
         // Check for duplicate content (for messages without IDs)
-        if (message.getMessageId() == null) {
+        // This is especially important for system messages and local history
+        if (message.getType() == ChatMessage.TYPE_SYSTEM ||
+                (message.getMessageId() == null && message.isHistorical())) {
+
             // Look for similar message content in recent messages
-            for (int i = Math.max(0, chatMessages.size() - 10); i < chatMessages.size(); i++) {
+            for (int i = Math.max(0, chatMessages.size() - 15); i < chatMessages.size(); i++) {
                 ChatMessage existing = chatMessages.get(i);
                 if (existing.getMessage().equals(message.getMessage()) &&
                         existing.getType() == message.getType()) {
@@ -420,6 +429,8 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         // Check if this is a repetitive system message we should filter
         if (message.contains("Connected to chat") ||
                 message.contains("Connecting to chat") ||
+                message.contains("Loaded") && message.contains("messages from history") ||
+                message.contains("Found recording") ||
                 message.contains("Local message history loaded")) {
 
             // Check if we've seen this message recently
@@ -443,6 +454,31 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         if (isRepeatedSystemMessage(message)) {
             Log.d(TAG, "Filtered repeated system message: " + message);
             return;
+        }
+
+        // Group connection-related messages
+        if (message.contains("Connecting") || message.contains("Connected")) {
+            // If we already have a connecting message, replace it instead of adding a new one
+            for (int i = chatMessages.size() - 1; i >= Math.max(0, chatMessages.size() - 5); i--) {
+                ChatMessage existingMsg = chatMessages.get(i);
+                if (existingMsg.getType() == ChatMessage.TYPE_SYSTEM &&
+                        (existingMsg.getMessage().contains("Connecting") ||
+                                existingMsg.getMessage().contains("Connected"))) {
+
+                    // Replace instead of adding new
+                    chatMessages.set(i, new ChatMessage(
+                            message,
+                            ChatMessage.TYPE_SYSTEM,
+                            "System",
+                            getCurrentTimestamp(),
+                            null,
+                            false
+                    ));
+
+                    chatAdapter.notifyItemChanged(i);
+                    return;
+                }
+            }
         }
 
         ChatMessage systemMessage = new ChatMessage(
@@ -563,9 +599,10 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
 
                 if (!localMessages.isEmpty()) {
                     mainHandler.post(() -> {
-                        // Only show one system message about loading history
+                        // ONLY show system messages when there are valid messages to display
                         addSystemMessage("Local message history loaded");
 
+                        int validMessageCount = 0;
                         for (LocalChatMessage msg : localMessages) {
                             // Skip empty messages and ping/pong messages
                             if (TextUtils.isEmpty(msg.getMessage())) {
@@ -578,7 +615,9 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
                             }
 
                             // Skip messages we already have by ID
-                            if (msg.getMessageId() != null && messageIds.contains(msg.getMessageId())) {
+                            if (msg.getMessageId() != null &&
+                                    (messageIds.contains(msg.getMessageId()) ||
+                                            processedMessageIds.contains(msg.getMessageId()))) {
                                 continue;
                             }
 
@@ -592,12 +631,17 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
                                     true // Mark as historical
                             );
                             addMessageToChat(uiMessage);
+                            validMessageCount++;
 
-                            // Add ID to tracking set if available
+                            // Track this message ID to prevent duplicates
                             if (msg.getMessageId() != null) {
                                 messageIds.add(msg.getMessageId());
+                                processedMessageIds.add(msg.getMessageId());
                             }
                         }
+
+                        // Log how many messages were actually added
+                        Log.d(TAG, "Added " + validMessageCount + " messages from local history");
                     });
                 }
             } catch (Exception e) {
@@ -606,6 +650,10 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         });
     }
 
+    // Modify the onMessageReceived method to filter system messages about history
+    private final Set<String> processedMessageIds = new HashSet<>(); // Track processed message IDs
+
+    // Modify the onMessageReceived method to be much stricter with history handling
     @Override
     public void onMessageReceived(String sender, String message, String timestamp,
                                   String messageId, boolean isHistorical) {
@@ -620,17 +668,36 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
             return;
         }
 
-        // Filter repetitive system messages
-        if (sender.equals("system")) {
-            // Skip "Loaded X messages" system messages if we've already loaded history once
-            if (message.contains("Loaded") && message.contains("messages from history") && initialHistoryLoaded) {
-                Log.d(TAG, "Skipping duplicate history message");
+        // Handle system messages specially
+        if ("system".equals(sender)) {
+            // Filter special cases of system messages
+            if (message.contains("Loaded") && message.contains("messages from history")) {
+                if (initialHistoryLoaded) {
+                    Log.d(TAG, "Skipping duplicate history loaded message");
+                    return;
+                }
+                initialHistoryLoaded = true;
+            }
+
+            // Track recent system messages to avoid duplicates
+            if (isRepeatedSystemMessage(message)) {
+                Log.d(TAG, "Skipping repeated system message: " + message);
+                return;
+            }
+        }
+
+        // CRITICAL: If we receive a message with a message ID we've seen locally already,
+        // we MUST skip it to prevent duplication
+        if (messageId != null) {
+            if (messageIds.contains(messageId)) {
+                Log.d(TAG, "Skipping duplicate message with ID: " + messageId);
                 return;
             }
 
-            // If this is a "Loaded X messages" system message, mark that we've loaded history
-            if (message.contains("Loaded") && message.contains("messages from history")) {
-                initialHistoryLoaded = true;
+            // Also check the processed IDs to be extra safe
+            if (processedMessageIds.contains(messageId)) {
+                Log.d(TAG, "Skipping already processed message with ID: " + messageId);
+                return;
             }
         }
 
@@ -649,12 +716,6 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
                 displaySender = deviceId.equals(sender) ? "You" : sender;
             }
 
-            // Check for duplicate messages by ID
-            if (messageId != null && messageIds.contains(messageId)) {
-                Log.d(TAG, "Skipping duplicate message with ID: " + messageId);
-                return; // Skip duplicates
-            }
-
             ChatMessage chatMessage = new ChatMessage(
                     message,
                     messageType,
@@ -669,8 +730,8 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
             // Hide typing indicator after receiving a message
             typingIndicator.setVisibility(View.GONE);
 
-            // Save message to local database if it's from admin
-            if (messageType == ChatMessage.TYPE_ADMIN && messageId != null) {
+            // Save message to local database if it's from admin AND not historical
+            if (messageType == ChatMessage.TYPE_ADMIN && messageId != null && !isHistorical) {
                 executor.execute(() -> {
                     try {
                         RecordingRepository repository = new RecordingRepository(ChatActivity.this);
@@ -684,6 +745,11 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
                         Log.e(TAG, "Error saving admin message locally", e);
                     }
                 });
+            }
+
+            // Add to processed IDs to prevent duplicate display
+            if (messageId != null) {
+                processedMessageIds.add(messageId);
             }
         });
     }
@@ -823,6 +889,8 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         // Reset state variables
         initialHistoryLoaded = false;
         recentSystemMessages.clear();
+        processedMessageIds.clear();
+        messageIds.clear();
 
         // Unregister network receiver
         try {
