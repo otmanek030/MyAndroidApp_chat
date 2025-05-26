@@ -7,5 +7,10 @@
         android:id="@+id/nav_chat"
         android:icon="@drawable/ic_add"
         android:title="Chat" />
+    <item
+        android:id="@+id/action_task_checklist"
+        android:title="Task Checklist"
+        android:icon="@drawable/ic_checklist"
+        app:showAsAction="never" />
 
 </menu>

@@ -21,7 +21,7 @@ import retrofit2.converter.gson.GsonConverterFactory;
 
 public class RetrofitClient {
     private static final String TAG = "RetrofitClient";
-    private static final String DEFAULT_BASE_URL = "http://192.168.1.130:8000/api/";
+    private static final String DEFAULT_BASE_URL = "http://192.168.100.91:8000/api/";
     private static final String PREF_SERVER_URL = "server_url";
     private static final int CONNECT_TIMEOUT = 15;
     private static final int READ_TIMEOUT = 15;
@@ -31,6 +31,7 @@ public class RetrofitClient {
     private static volatile RetrofitClient instance;
     private final Context context;
     private Retrofit retrofit;
+    private Retrofit checklistRetrofit; // Add separate retrofit for checklist API
     private RecordingApiService apiService;
     private final AtomicBoolean isCheckingServer = new AtomicBoolean(false);
 
@@ -62,13 +63,54 @@ public class RetrofitClient {
                 .retryOnConnectionFailure(true)
                 .build();
 
+        // Main API retrofit (for recordings)
         retrofit = new Retrofit.Builder()
                 .baseUrl(getServerUrl())
                 .client(client)
                 .addConverterFactory(GsonConverterFactory.create())
                 .build();
 
+        // Checklist API retrofit
+        checklistRetrofit = new Retrofit.Builder()
+                .baseUrl(getChecklistServerUrl())
+                .client(client)
+                .addConverterFactory(GsonConverterFactory.create())
+                .build();
+
         apiService = retrofit.create(RecordingApiService.class);
+    }
+
+    // Get checklist-specific server URL
+    private String getChecklistServerUrl() {
+        String baseUrl = getServerUrl();
+        // Remove /api/ from the end and add checklists/api/
+        baseUrl = baseUrl.replace("/api/", "/");
+        if (!baseUrl.endsWith("/")) {
+            baseUrl += "/";
+        }
+        return baseUrl + "checklists/api/";
+    }
+
+    public TaskChecklistApiService getTaskChecklistApiService() {
+        if (checklistRetrofit == null) {
+            initRetrofit();
+        }
+        return checklistRetrofit.create(TaskChecklistApiService.class);
+    }
+
+    // Or if you prefer the createService pattern:
+    public <T> T createService(Class<T> serviceClass) {
+        if (serviceClass == TaskChecklistApiService.class) {
+            if (checklistRetrofit == null) {
+                initRetrofit();
+            }
+            return checklistRetrofit.create(serviceClass);
+        } else {
+            if (retrofit == null) {
+                initRetrofit();
+            }
+            return retrofit.create(serviceClass);
+        }
     }
 
     public RecordingApiService getApiService() {

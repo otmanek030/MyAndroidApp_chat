@@ -43,6 +43,9 @@ import com.plcoding.audiorecorder.data.Recording;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+import com.plcoding.audiorecorder.forms.ChecklistCategory;
+
+
 public class MainActivity extends AppCompatActivity {
     private AndroidAudioRecorder recorder;
     private AndroidAudioPlayer player;
@@ -50,10 +53,11 @@ public class MainActivity extends AppCompatActivity {
     private RecyclerView recyclerView;
     private RecordingAdapter adapter;
 
-    // FAB Menu
+    // FAB Menu - Updated to include task checklist FAB
     private FloatingActionButton fabMain;
     private FloatingActionButton fabVoice;
     private FloatingActionButton fabText;
+    private FloatingActionButton fabTaskChecklist; // ADD THIS
     private View overlay;
     private boolean isFabMenuOpen = false;
     private boolean isRecording = false;
@@ -255,6 +259,37 @@ public class MainActivity extends AppCompatActivity {
         return true;
     }
 
+    private void openTaskChecklistEnhanced() {
+        Intent intent = new Intent(MainActivity.this, TaskChecklistActivity.class);
+        intent.putExtra("enhanced_ui", true); // Flag for enhanced UI
+        startActivity(intent);
+    }
+
+    // ADD THIS METHOD FOR MENU ITEM SELECTION
+//    @Override
+//    public boolean onOptionsItemSelected(MenuItem item) {
+//        int id = item.getItemId();
+//
+//        if (id == R.id.action_task_checklist) {
+//            Intent intent = new Intent(this, TaskChecklistActivity.class);
+//            startActivity(intent);
+//            return true;
+//        } else if (id == R.id.action_conversations) {
+//            Intent intent = new Intent(this, ConversationsActivity.class);
+//            startActivity(intent);
+//            return true;
+//        } else if (id == R.id.action_sync) {
+//            forceSyncAll();
+//            return true;
+//        } else if (id == R.id.action_settings) {
+//            Intent intent = new Intent(this, ServerConfigActivity.class);
+//            startActivity(intent);
+//            return true;
+//        }
+//
+//        return super.onOptionsItemSelected(item);
+//    }
+
     /**
      * Force sync all pending uploads
      */
@@ -298,22 +333,32 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    // UPDATED METHOD WITH TASK CHECKLIST INTEGRATION
     private void initializeViews() {
         recyclerView = findViewById(R.id.recordings_recycler_view);
         fabMain = findViewById(R.id.fab_main);
         fabVoice = findViewById(R.id.fab_voice);
         fabText = findViewById(R.id.fab_text);
+        fabTaskChecklist = findViewById(R.id.fab_task_checklist);    // ADD THIS
         overlay = findViewById(R.id.overlay);
 
         // Initialize conversations button
         Button conversationsButton = findViewById(R.id.conversations_button);
+        if (conversationsButton != null) {
+            conversationsButton.setOnClickListener(v -> {
+                Intent intent = new Intent(MainActivity.this, ConversationsActivity.class);
+                startActivity(intent);
+            });
+        }
 
-        // Set click listener for the conversations button
-        conversationsButton.setOnClickListener(v -> {
-            // Navigate to Conversations Activity
-            Intent intent = new Intent(MainActivity.this, ConversationsActivity.class);
-            startActivity(intent);
-        });
+        // ADD THIS: Initialize task checklist button
+        Button taskChecklistButton = findViewById(R.id.task_checklist_button);
+        if (taskChecklistButton != null) {
+            taskChecklistButton.setOnClickListener(v -> {
+                Intent intent = new Intent(MainActivity.this, TaskChecklistActivity.class);
+                startActivity(intent);
+            });
+        }
     }
 
     private void setupRecyclerView() {
@@ -332,6 +377,7 @@ public class MainActivity extends AppCompatActivity {
         recyclerView.setAdapter(adapter);
     }
 
+    // UPDATED METHOD WITH TASK CHECKLIST FAB
     private void setupFabMenu() {
         // Set click listener first
         fabMain.setOnClickListener(v -> handleMainFabClick());
@@ -346,7 +392,30 @@ public class MainActivity extends AppCompatActivity {
             showTextInputDialog();
         });
 
+        // Enhanced Task Checklist FAB with new features
+        if (fabTaskChecklist != null) {
+            fabTaskChecklist.setOnClickListener(v -> {
+                closeFabMenu();
+                openTaskChecklistEnhanced(); // Use enhanced version
+            });
+        }
+
         overlay.setOnClickListener(v -> closeFabMenu());
+    }
+
+
+    private void openEnhancedChecklist() {
+        Intent intent = new Intent(MainActivity.this, ChecklistCompletionActivity.class);
+        intent.putExtra("form_id", 1); // Example form ID
+        intent.putExtra("form_title", "Enhanced Safety Checklist");
+        intent.putExtra("is_mandatory", true);
+        startActivity(intent);
+    }
+
+    // ADD THIS METHOD:
+    private void openTaskChecklist() {
+        Intent intent = new Intent(MainActivity.this, TaskChecklistActivity.class);
+        startActivity(intent);
     }
 
     private void setupDraggableFab() {
@@ -414,6 +483,7 @@ public class MainActivity extends AppCompatActivity {
         showMenuFabs();
     }
 
+    // UPDATED METHOD TO INCLUDE TASK CHECKLIST FAB
     private void showMenuFabs() {
         // Get main FAB position
         float mainFabX = fabMain.getX();
@@ -428,8 +498,16 @@ public class MainActivity extends AppCompatActivity {
         fabText.setX(mainFabX);
         fabText.setY(mainFabY - dpToPx(140));
         animateFabIn(fabText);
+
+        // ADD THIS: Position task checklist FAB
+        if (fabTaskChecklist != null) {
+            fabTaskChecklist.setX(mainFabX);
+            fabTaskChecklist.setY(mainFabY - dpToPx(210));
+            animateFabIn(fabTaskChecklist);
+        }
     }
 
+    // UPDATED METHOD TO INCLUDE TASK CHECKLIST FAB
     private void closeFabMenu() {
         isFabMenuOpen = false;
 
@@ -444,6 +522,11 @@ public class MainActivity extends AppCompatActivity {
         // Hide menu FABs with animation
         animateFabOut(fabText);
         animateFabOut(fabVoice);
+
+        // ADD THIS: Hide task checklist FAB
+        if (fabTaskChecklist != null) {
+            animateFabOut(fabTaskChecklist);
+        }
     }
 
     private void animateFabIn(FloatingActionButton fab) {

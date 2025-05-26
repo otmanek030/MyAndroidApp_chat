@@ -1,5 +1,6 @@
 package com.plcoding.audiorecorder.ui.theme;
 
+import android.annotation.SuppressLint;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -145,6 +146,7 @@ public class RecordingAdapter extends RecyclerView.Adapter<RecordingAdapter.Reco
         ImageButton playButton;
         ImageButton deleteButton;
 
+        @SuppressLint("WrongViewCast")
         RecordingViewHolder(View itemView) {
             super(itemView);
             titleTextView = itemView.findViewById(R.id.title_text_view);

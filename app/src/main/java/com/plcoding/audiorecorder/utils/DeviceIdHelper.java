@@ -31,6 +31,7 @@ public class DeviceIdHelper {
 
         // If we already have a device ID, return it
         if (deviceId != null && !deviceId.isEmpty()) {
+            Log.d(TAG, "Retrieved existing device ID: " + deviceId);
             return deviceId;
         }
 
@@ -45,7 +46,7 @@ public class DeviceIdHelper {
     }
 
     /**
-     * Generate a unique device ID
+     * Generate a unique device ID - FIXED VERSION
      */
     @SuppressLint("HardwareIds")
     private static String generateDeviceId(Context context) {
@@ -54,26 +55,26 @@ public class DeviceIdHelper {
         try {
             // Try to use Android ID first
             androidId = Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ANDROID_ID);
+            Log.d(TAG, "Raw Android ID: " + androidId);
         } catch (Exception e) {
             Log.e(TAG, "Error getting Android ID", e);
         }
 
         // If Android ID is null or "9774d56d682e549c" (known bug value), generate a UUID
         if (androidId == null || androidId.equals("9774d56d682e549c") || androidId.length() < 8) {
-            // Combine some device info with a random UUID
-            String deviceInfo = Build.BRAND + Build.DEVICE + Build.MANUFACTURER + Build.MODEL;
-            UUID deviceUuid = new UUID(deviceInfo.hashCode(), System.currentTimeMillis());
-            androidId = deviceUuid.toString();
+            Log.d(TAG, "Using UUID fallback for device ID");
+            return generateFallbackId();
         }
 
-        // Clean up the ID (remove hyphens and ensure it's the right length)
-        androidId = androidId.replace("-", "");
+        // IMPORTANT: Clean the ID to avoid path traversal issues
+        // Remove any characters that could be interpreted as path traversal
+        androidId = androidId.replaceAll("[^a-zA-Z0-9]", "");
 
         // Ensure ID is at least 12 characters long
         if (androidId.length() < 12) {
-            // Pad with a partial UUID
-            String padUuid = UUID.randomUUID().toString().replace("-", "");
-            androidId = androidId + padUuid.substring(0, 16 - androidId.length());
+            // Pad with a partial UUID (cleaned)
+            String padUuid = UUID.randomUUID().toString().replaceAll("[^a-zA-Z0-9]", "");
+            androidId = androidId + padUuid.substring(0, Math.min(padUuid.length(), 16 - androidId.length()));
         }
 
         // Truncate if longer than 16 characters
@@ -81,14 +82,19 @@ public class DeviceIdHelper {
             androidId = androidId.substring(0, 16);
         }
 
+        Log.d(TAG, "Final cleaned device ID: " + androidId);
         return androidId;
     }
 
     /**
-     * Fallback method to generate a random device ID
+     * Fallback method to generate a random device ID - CLEANED VERSION
      */
     private static String generateFallbackId() {
-        return UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+        // Generate a clean alphanumeric ID
+        String uuid = UUID.randomUUID().toString().replaceAll("[^a-zA-Z0-9]", "");
+        String fallbackId = uuid.substring(0, Math.min(16, uuid.length()));
+        Log.d(TAG, "Generated fallback ID: " + fallbackId);
+        return fallbackId;
     }
 
     /**
@@ -97,5 +103,14 @@ public class DeviceIdHelper {
     public static void clearDeviceId(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE);
         prefs.edit().remove(PREF_DEVICE_ID).apply();
+        Log.d(TAG, "Cleared stored device ID");
+    }
+
+    /**
+     * Force regenerate device ID (for debugging)
+     */
+    public static String regenerateDeviceId(Context context) {
+        clearDeviceId(context);
+        return getDeviceId(context);
     }
 }

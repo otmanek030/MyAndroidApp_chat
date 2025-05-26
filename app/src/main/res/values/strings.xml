@@ -42,5 +42,7 @@
     <string name="retry">Retry</string>
     <string name="type_a_message">Type a message…</string>
     <string name="admin_is_typing">Admin is typing…</string>
+    <string name="available_task_checklists">Available Task Checklists</string>
+    <string name="no_checklists_available">No checklists available</string>
 
 </resources>

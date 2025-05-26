@@ -27,5 +27,44 @@
     <color name="white">#FFFFFFFF</color>
 
 
+    <color name="primary_blue">#4e73df</color>
+    <color name="primary_blue_dark">#3c5aa8</color>
+    <color name="success_green">#1cc88a</color>
+    <color name="success_green_dark">#169b6b</color>
+    <color name="info_cyan">#36b9cc</color>
+    <color name="info_cyan_dark">#2c9faf</color>
+    <color name="danger_red">#e74a3b</color>
+    <color name="light_gray">#f8f9fc</color>
+
+
+    <!-- Existing colors -->
+    <color name="colorPrimaryDark">#1976D2</color>
+    <color name="colorAccent">#FF4081</color>
+
+    <!-- Text colors -->
+    <color name="textPrimary">#212121</color>
+    <color name="textSecondary">#757575</color>
+
+    <!-- Background colors -->
+    <color name="category_background">#F8F9FA</color>
+    <color name="category_border">#E9ECEF</color>
+    <color name="photo_background">#F5F5F5</color>
+    <color name="info_background">#E3F2FD</color>
+    <color name="info_border">#BBDEFB</color>
+    <color name="remove_button_background">#F44336</color>
+
+    <!-- Border and stroke colors -->
+    <color name="stroke_color">#E0E0E0</color>
+    <color name="icon_tint">#9E9E9E</color>
+
+    <!-- Status colors -->
+    <color name="success_color">#4CAF50</color>
+    <color name="warning_color">#FF9800</color>
+    <color name="error_color">#F44336</color>
+
+    <!-- Card colors -->
+    <color name="card_shadow">#1A000000</color>
+
+
     <color name="colorPrimary">#3F51B5</color>
 </resources>
