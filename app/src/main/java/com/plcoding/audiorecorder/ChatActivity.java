@@ -1,3 +1,5 @@
+// ChatActivity.java - FIXED VERSION to prevent multiple connections
+
 package com.plcoding.audiorecorder;
 
 import android.content.BroadcastReceiver;
@@ -6,7 +8,6 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -32,8 +33,6 @@ import com.plcoding.audiorecorder.data.Recording;
 import com.plcoding.audiorecorder.data.RecordingRepository;
 import com.plcoding.audiorecorder.utils.DeviceIdHelper;
 
-import org.json.JSONObject;
-
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -41,96 +40,88 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ChatActivity extends AppCompatActivity implements ChatWebSocketClient.MessageListener {
     private static final String TAG = "ChatActivity";
+    private static final int MAX_RECONNECT_ATTEMPTS = 3;
 
-    // Class members
+    // UI Components
     private RecyclerView chatRecyclerView;
     private ChatAdapter chatAdapter;
-    private final List<ChatMessage> chatMessages = new ArrayList<>();
-    private final Set<String> messageIds = new HashSet<>(); // Track message IDs
-
     private EditText messageInput;
     private Button sendButton;
-    private TextView typingIndicator;
-    private View connectionStatusView;
     private TextView connectionStatus;
     private ProgressBar connectionProgress;
+    private View connectionStatusContainer;
+    private Button retryButton;
 
+    // Data
+    private final List<ChatMessage> chatMessages = new ArrayList<>();
+    private final Set<String> processedMessageIds = new HashSet<>();
+    private final Set<String> recentSystemMessages = new HashSet<>();
+
+    // Connection - FIXED: Add atomic flags to prevent race conditions
     private ChatWebSocketClient chatWebSocket;
-    // Declare test client as a class member to fix NullPointerException
-    private ChatWebSocketClient testClient;
+    private final AtomicBoolean isConnecting = new AtomicBoolean(false);
+    private final AtomicBoolean isConnected = new AtomicBoolean(false);
     private String recordingId;
     private String deviceId;
-    private boolean isConnected = false;
     private int reconnectAttempts = 0;
 
-    // Background thread management
+    // Background processing
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    private final List<String> queuedMessages = new ArrayList<>();
+    private RecordingRepository repository;
 
-    // Connection state
-    private static final int STATE_DISCONNECTED = 0;
-    private static final int STATE_CONNECTING = 1;
-    private static final int STATE_CONNECTED = 2;
-    private int connectionState = STATE_DISCONNECTED;
-
-    private static final int MAX_CONNECTION_ATTEMPTS = 5;
-    private boolean isConnecting = false;
-    private final Object connectionLock = new Object();
-
+    // State management
+    private boolean isDestroyed = false;
     private boolean initialHistoryLoaded = false;
-
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_chat);
 
-        // Get recording ID from intent
+        // Get parameters
         recordingId = getIntent().getStringExtra("recording_id");
-        if (recordingId == null) {
+        if (TextUtils.isEmpty(recordingId)) {
             showErrorAndFinish("No recording ID provided");
             return;
         }
 
-        // Get device ID
         deviceId = DeviceIdHelper.getDeviceId(this);
         if (TextUtils.isEmpty(deviceId)) {
             showErrorAndFinish("Failed to get device ID");
             return;
         }
 
-        Log.d(TAG, "Activity started with deviceId: " + deviceId + ", recordingId: " + recordingId);
+        Log.d(TAG, "Starting chat: deviceId=" + deviceId + ", recordingId=" + recordingId);
 
+        // Initialize repository
+        repository = new RecordingRepository(this);
 
-        initialHistoryLoaded = false;
-
-        // Initialize views
+        // Initialize UI
         initializeViews();
 
-        // Load local messages first
-        loadLocalMessages();
-
-        // Verify recording exists
-        verifyRecordingExists(recordingId);
+        // Load recording info and start connection
+        loadRecordingInfo();
 
         // Register network receiver
         registerReceiver(networkReceiver, new IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION));
     }
 
     private void initializeViews() {
+        // Find views
         chatRecyclerView = findViewById(R.id.chat_recycler_view);
         messageInput = findViewById(R.id.message_input);
         sendButton = findViewById(R.id.send_button);
-        typingIndicator = findViewById(R.id.typing_indicator);
-        connectionStatusView = findViewById(R.id.connection_status_container);
         connectionStatus = findViewById(R.id.connection_status);
         connectionProgress = findViewById(R.id.connection_progress);
+        connectionStatusContainer = findViewById(R.id.connection_status_container);
+        retryButton = findViewById(R.id.retry_button);
 
-        // Set up RecyclerView
+        // Setup RecyclerView
         LinearLayoutManager layoutManager = new LinearLayoutManager(this);
         layoutManager.setStackFromEnd(true);
         chatRecyclerView.setLayoutManager(layoutManager);
@@ -138,33 +129,420 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         chatAdapter = new ChatAdapter(chatMessages);
         chatRecyclerView.setAdapter(chatAdapter);
 
-        // Disable input until connected
+        // Setup input controls
         updateInputState(false);
 
-        // Set up retry button
-        Button retryButton = findViewById(R.id.retry_button);
-        retryButton.setOnClickListener(v -> {
-            // Reset connection attempts
-            reconnectAttempts = 0;
+        // Setup button listeners
+        sendButton.setOnClickListener(v -> sendMessage());
+        retryButton.setOnClickListener(v -> retryConnection());
 
-            // Clear any existing connection
-            closeAllWebSockets();
+        // Show initial status
+        showConnectionStatus("Preparing to connect...", true);
+    }
 
-            // Show connecting status
-            showConnectionStatus(true, "Connecting...");
+    private void loadRecordingInfo() {
+        executor.execute(() -> {
+            try {
+                Recording recording = repository.getRecording(Long.parseLong(recordingId));
 
-            // Check connectivity
-            executor.execute(this::verifyServerConnectivity);
-        });
+                mainHandler.post(() -> {
+                    if (recording != null) {
+                        setTitle("Chat - " + recording.getTitle());
+                        addSystemMessage("Found recording: " + recording.getTitle());
 
-        // Set up message sending
-        sendButton.setOnClickListener(v -> {
-            String message = messageInput.getText().toString().trim();
-            if (!message.isEmpty()) {
-                sendMessage(message);
-                messageInput.setText("");
+                        // Load local messages first
+                        loadLocalMessages();
+
+                        // Then connect to server
+                        connectToServerSafely();
+                    } else {
+                        showErrorAndFinish("Recording not found");
+                    }
+                });
+
+            } catch (Exception e) {
+                Log.e(TAG, "Error loading recording info", e);
+                mainHandler.post(() -> showErrorAndFinish("Error loading recording: " + e.getMessage()));
             }
         });
+    }
+
+    private void loadLocalMessages() {
+        executor.execute(() -> {
+            try {
+                List<LocalChatMessage> localMessages = repository.getLocalChatMessages(Long.parseLong(recordingId));
+
+                mainHandler.post(() -> {
+                    if (!localMessages.isEmpty()) {
+                        addSystemMessage("Loading " + localMessages.size() + " local messages...");
+
+                        for (LocalChatMessage msg : localMessages) {
+                            // Skip empty messages and ping/pong
+                            if (TextUtils.isEmpty(msg.getMessage()) ||
+                                    isPingPongMessage(msg.getMessage()) ||
+                                    processedMessageIds.contains(msg.getMessageId())) {
+                                continue;
+                            }
+
+                            ChatMessage chatMessage = new ChatMessage(
+                                    msg.getMessage(),
+                                    msg.isFromDevice() ? ChatMessage.TYPE_DEVICE : ChatMessage.TYPE_ADMIN,
+                                    msg.isFromDevice() ? "You" : "Admin",
+                                    formatTimestamp(msg.getTimestamp()),
+                                    msg.getMessageId(),
+                                    true // Mark as historical
+                            );
+
+                            addMessageToChat(chatMessage);
+
+                            if (msg.getMessageId() != null) {
+                                processedMessageIds.add(msg.getMessageId());
+                            }
+                        }
+
+                        addSystemMessage("Local messages loaded");
+                        initialHistoryLoaded = true;
+                    }
+                });
+
+            } catch (Exception e) {
+                Log.e(TAG, "Error loading local messages", e);
+                mainHandler.post(() -> addSystemMessage("Error loading local messages"));
+            }
+        });
+    }
+
+    // FIXED: Prevent multiple simultaneous connections
+    private void connectToServerSafely() {
+        if (isDestroyed || isConnecting.get()) {
+            Log.d(TAG, "Skipping connection attempt - already connecting or destroyed");
+            return;
+        }
+
+        if (isConnected.get()) {
+            Log.d(TAG, "Already connected, skipping connection attempt");
+            return;
+        }
+
+        showConnectionStatus("Connecting to server...", true);
+        isConnecting.set(true);
+
+        executor.execute(() -> {
+            // Check server reachability first
+            boolean serverReachable = RetrofitClient.getInstance(this).isServerReachable();
+
+            mainHandler.post(() -> {
+                if (serverReachable) {
+                    startWebSocketConnectionSafely();
+                } else {
+                    isConnecting.set(false);
+                    showConnectionStatus("Server not reachable", false);
+                    addSystemMessage("Server not reachable. Will retry...");
+                    scheduleReconnect();
+                }
+            });
+        });
+    }
+
+    // FIXED: Ensure only one connection at a time
+    private void startWebSocketConnectionSafely() {
+        try {
+            // Close any existing connection and wait
+            closeExistingConnectionAndWait();
+
+            String serverUrl = getWebSocketUrl();
+            Log.d(TAG, "Creating single WebSocket connection to: " + serverUrl);
+
+            chatWebSocket = new ChatWebSocketClient(serverUrl, this, deviceId, recordingId);
+            chatWebSocket.connect();
+
+        } catch (URISyntaxException e) {
+            Log.e(TAG, "Invalid WebSocket URL", e);
+            isConnecting.set(false);
+            showConnectionStatus("Invalid server URL", false);
+            addSystemMessage("Invalid server URL: " + e.getMessage());
+        } catch (Exception e) {
+            Log.e(TAG, "Error starting WebSocket connection", e);
+            isConnecting.set(false);
+            showConnectionStatus("Connection error", false);
+            addSystemMessage("Connection error: " + e.getMessage());
+            scheduleReconnect();
+        }
+    }
+
+    // FIXED: Properly wait for connection closure
+    private void closeExistingConnectionAndWait() {
+        if (chatWebSocket != null) {
+            Log.d(TAG, "Closing existing WebSocket connection");
+
+            try {
+                ChatWebSocketClient clientToClose = chatWebSocket;
+                chatWebSocket = null; // Clear reference immediately
+                clientToClose.closePermanently();
+
+                // Wait a bit for connection to fully close
+                Thread.sleep(100);
+
+            } catch (Exception e) {
+                Log.e(TAG, "Error closing existing WebSocket", e);
+            }
+        }
+    }
+
+    public String getWebSocketUrl() {
+        String baseUrl = RetrofitClient.getInstance(this).getWebSocketBaseUrl();
+        baseUrl = baseUrl.replace("http://", "").replace("https://", "")
+                .replace("ws://", "").replace("wss://", "");
+
+        // Remove trailing slashes
+        while (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+
+        return String.format("ws://%s/ws/chat/%s/%s/", baseUrl, deviceId, recordingId);
+    }
+
+    private void retryConnection() {
+        Log.d(TAG, "Manual retry connection requested");
+        reconnectAttempts = 0;
+        isConnecting.set(false);
+        isConnected.set(false);
+        connectToServerSafely();
+    }
+
+    private void scheduleReconnect() {
+        if (isDestroyed || reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+            showConnectionStatus("Max retries reached", false);
+            return;
+        }
+
+        reconnectAttempts++;
+        long delay = Math.min(30000, 2000L * reconnectAttempts); // Max 30 seconds
+
+        showConnectionStatus("Retrying in " + (delay / 1000) + "s...", true);
+
+        mainHandler.postDelayed(() -> {
+            if (!isDestroyed) {
+                connectToServerSafely();
+            }
+        }, delay);
+    }
+
+    // === MESSAGE HANDLING ===
+
+    private void sendMessage() {
+        String message = messageInput.getText().toString().trim();
+        if (TextUtils.isEmpty(message)) {
+            return;
+        }
+
+        if (!isConnected.get() || chatWebSocket == null) {
+            // Save message locally for offline use
+            saveMessageLocally(message, true);
+
+            ChatMessage chatMessage = new ChatMessage(
+                    message, ChatMessage.TYPE_DEVICE, "You", getCurrentTimestamp(), null, false
+            );
+            addMessageToChat(chatMessage);
+            messageInput.setText("");
+
+            Toast.makeText(this, "Message saved offline", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        try {
+            // Send to server with correct sender_type
+            chatWebSocket.sendMessage(message, deviceId);
+
+            // Clear input
+            messageInput.setText("");
+
+            // Don't add to UI here - wait for server confirmation
+            // The message will be added when we receive it back from the server
+
+            // Save locally
+            saveMessageLocally(message, true);
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error sending message", e);
+            Toast.makeText(this, "Error sending message", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void saveMessageLocally(String message, boolean isFromDevice) {
+        executor.execute(() -> {
+            try {
+                repository.saveLocalChatMessage(Long.parseLong(recordingId), message, isFromDevice, null);
+            } catch (Exception e) {
+                Log.e(TAG, "Error saving message locally", e);
+            }
+        });
+    }
+
+    private void addMessageToChat(ChatMessage message) {
+        if (shouldSkipMessage(message)) {
+            return;
+        }
+
+        chatMessages.add(message);
+        chatAdapter.notifyItemInserted(chatMessages.size() - 1);
+        chatRecyclerView.smoothScrollToPosition(chatMessages.size() - 1);
+    }
+
+    private void addSystemMessage(String message) {
+        // Avoid duplicate system messages
+        if (recentSystemMessages.contains(message)) {
+            return;
+        }
+
+        recentSystemMessages.add(message);
+        if (recentSystemMessages.size() > 10) {
+            recentSystemMessages.clear();
+        }
+
+        ChatMessage systemMessage = new ChatMessage(
+                message, ChatMessage.TYPE_SYSTEM, "System", getCurrentTimestamp(), null, false
+        );
+        addMessageToChat(systemMessage);
+    }
+
+    private boolean shouldSkipMessage(ChatMessage message) {
+        // Skip empty messages
+        if (TextUtils.isEmpty(message.getMessage())) {
+            return true;
+        }
+
+        // Skip ping/pong messages
+        if (isPingPongMessage(message.getMessage())) {
+            return true;
+        }
+
+        // FIXED: Only skip exact duplicates with same message ID
+        // Don't skip based on content to allow for full conversation display
+        if (message.getMessageId() != null && processedMessageIds.contains(message.getMessageId())) {
+            Log.d(TAG, "Skipping duplicate message ID: " + message.getMessageId());
+            return true;
+        }
+
+        return false;
+    }
+
+    private boolean isPingPongMessage(String message) {
+        if (message == null) return false;
+        String msg = message.toLowerCase().trim();
+        return msg.equals("ping") || msg.equals("pong");
+    }
+
+    // === WebSocket LISTENER IMPLEMENTATION ===
+
+    @Override
+    public void onMessageReceived(String sender, String message, String timestamp, String messageId, boolean isHistorical) {
+        if (isDestroyed || TextUtils.isEmpty(message) || isPingPongMessage(message)) {
+            return;
+        }
+
+        // Skip duplicates
+        if (messageId != null && processedMessageIds.contains(messageId)) {
+            Log.d(TAG, "Skipping duplicate message: " + messageId);
+            return;
+        }
+
+        mainHandler.post(() -> {
+            int messageType;
+            String displaySender;
+
+            // FIXED: Properly handle ALL sender types
+            switch (sender.toLowerCase()) {
+                case "admin":
+                    messageType = ChatMessage.TYPE_ADMIN;
+                    displaySender = "Admin";
+                    break;
+                case "system":
+                    messageType = ChatMessage.TYPE_SYSTEM;
+                    displaySender = "System";
+                    break;
+                case "device":
+                default:
+                    messageType = ChatMessage.TYPE_DEVICE;
+                    // Show "You" for messages from this device, otherwise show device ID
+                    displaySender = deviceId.equals(sender) ? "You" : sender;
+                    break;
+            }
+
+            ChatMessage chatMessage = new ChatMessage(
+                    message, messageType, displaySender, timestamp, messageId, isHistorical
+            );
+
+            // IMPORTANT: Don't skip any messages - show ALL messages to create full conversation
+            addMessageToChat(chatMessage);
+
+            // Track processed message ID
+            if (messageId != null) {
+                processedMessageIds.add(messageId);
+            }
+
+            // Save admin messages locally (but not our own device messages)
+            if (messageType == ChatMessage.TYPE_ADMIN && !isHistorical) {
+                saveMessageLocally(message, false);
+            }
+
+            Log.d(TAG, "Displayed message from " + sender + " (" + messageType + "): " + message);
+        });
+    }
+
+    @Override
+    public void onTypingStarted() {
+        // Not implemented in this version
+    }
+
+    @Override
+    public void onConnectionStateChange(boolean connected, String message) {
+        mainHandler.post(() -> {
+            isConnected.set(connected);
+            isConnecting.set(false); // Clear connecting flag
+
+            if (connected) {
+                reconnectAttempts = 0;
+                showConnectionStatus("Connected", false);
+                updateInputState(true);
+                addSystemMessage("Connected to chat server");
+            } else {
+                showConnectionStatus(message, false);
+                updateInputState(false);
+                addSystemMessage("Disconnected: " + message);
+
+                // Auto-reconnect on connection loss (but not if manually disconnecting)
+                if (!isDestroyed && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                    scheduleReconnect();
+                }
+            }
+        });
+    }
+
+    @Override
+    public void onError(String errorMessage) {
+        mainHandler.post(() -> {
+            isConnecting.set(false); // Clear connecting flag on error
+            addSystemMessage("Error: " + errorMessage);
+            Log.e(TAG, "WebSocket error: " + errorMessage);
+        });
+    }
+
+    // === UI HELPERS ===
+
+    private void showConnectionStatus(String status, boolean showProgress) {
+        connectionStatus.setText(status);
+        connectionProgress.setVisibility(showProgress ? View.VISIBLE : View.GONE);
+        connectionStatusContainer.setVisibility(View.VISIBLE);
+
+        // Auto-hide status after success
+        if (!showProgress && status.contains("Connected")) {
+            mainHandler.postDelayed(() -> {
+                if (connectionStatusContainer != null) {
+                    connectionStatusContainer.setVisibility(View.GONE);
+                }
+            }, 2000);
+        }
     }
 
     private void updateInputState(boolean enabled) {
@@ -172,10 +550,9 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         sendButton.setEnabled(enabled);
 
         if (enabled) {
-            messageInput.setHint(R.string.type_message_hint);
-            messageInput.requestFocus();
+            messageInput.setHint("Type a message...");
         } else {
-            messageInput.setHint(R.string.waiting_for_connection);
+            messageInput.setHint("Connecting...");
         }
     }
 
@@ -184,713 +561,56 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         finish();
     }
 
-    private void verifyRecordingExists(String recordingId) {
-        executor.execute(() -> {
-            try {
-                RecordingRepository repository = new RecordingRepository(this);
-                Recording recording = repository.getRecording(Long.parseLong(recordingId));
-
-                if (recording == null) {
-                    mainHandler.post(() -> showErrorAndFinish("Recording ID " + recordingId + " not found."));
-                } else {
-                    mainHandler.post(() -> {
-                        // Set title to recording title
-                        setTitle(recording.getTitle());
-
-                        // Show connecting status
-                        showConnectionStatus(true, "Connecting to chat...");
-
-                        // First check if server is reachable
-                        addSystemMessage("Found recording: " + recording.getTitle());
-                        verifyServerConnectivity();
-                    });
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "Error verifying recording", e);
-                mainHandler.post(() -> showErrorAndFinish("Error: " + e.getMessage()));
-            }
-        });
-    }
-
-    private void verifyServerConnectivity() {
-        executor.execute(() -> {
-            try {
-                Log.d(TAG, "Testing server connectivity...");
-                boolean isServerReachable = RetrofitClient.getInstance(this).isServerReachable();
-
-                mainHandler.post(() -> {
-                    if (isServerReachable) {
-                        showConnectionStatus(true, "Connecting to chat...");
-                        connectWebSocketDirectly(); // Skip test connection, connect directly
-                    } else {
-                        showConnectionStatus(false, "Server not reachable");
-                        addSystemMessage("Server not reachable. Please check your network connection.");
-                        scheduleReconnect();
-                    }
-                });
-            } catch (Exception e) {
-                Log.e(TAG, "Error checking server connection", e);
-                mainHandler.post(() -> {
-                    showConnectionStatus(false, "Connection error");
-                    addSystemMessage("Error checking server: " + e.getMessage());
-                    scheduleReconnect();
-                });
-            }
-        });
-    }
-
-    // Modified to connect directly instead of testing first
-    private void connectWebSocketDirectly() {
-        // Use synchronized to prevent multiple simultaneous connections
-        synchronized (connectionLock) {
-            // Don't try to connect if already connecting or if we've hit the max attempts
-            if (isConnecting || reconnectAttempts >= MAX_CONNECTION_ATTEMPTS) {
-                return;
-            }
-
-            isConnecting = true;
-        }
-
-        try {
-            // Close any existing connections first
-            closeAllWebSockets();
-
-            connectionState = STATE_CONNECTING;
-            showConnectionStatus(true, "Connecting to chat...");
-
-            String serverUrl = getServerUrl();
-            String chatUrl = String.format("ws://%s/ws/chat/%s/%s/",
-                    serverUrl, deviceId, recordingId);
-
-            Log.d(TAG, "Connecting to chat WebSocket: " + chatUrl);
-            addSystemMessage("Connecting to chat...");
-
-            // Create the WebSocket client
-            chatWebSocket = new ChatWebSocketClient(chatUrl, this, deviceId, recordingId);
-
-            // Add headers for identification
-            chatWebSocket.addHeader("X-Device-ID", deviceId);
-            chatWebSocket.addHeader("X-Recording-ID", recordingId);
-            chatWebSocket.addHeader("User-Agent", "AndroidVoiceRecorder");
-            chatWebSocket.addHeader("X-Client-Type", "android_mobile");
-
-            // Connect to the WebSocket
-            chatWebSocket.connect();
-            Log.d(TAG, "WebSocket connect() called");
-
-            // Set connection timeout - longer timeout for more reliability
-            mainHandler.postDelayed(() -> {
-                if (connectionState != STATE_CONNECTED && chatWebSocket != null) {
-                    Log.e(TAG, "WebSocket connection timed out");
-                    synchronized (connectionLock) {
-                        isConnecting = false;
-                    }
-                    chatWebSocket.close();
-                    connectionState = STATE_DISCONNECTED;
-                    onConnectionStateChange(false, "Connection timeout");
-                    scheduleReconnect();
-                }
-            }, 15000); // 15 seconds timeout
-
-        } catch (URISyntaxException e) {
-            Log.e(TAG, "URI syntax error: " + e.getMessage(), e);
-            connectionState = STATE_DISCONNECTED;
-            synchronized (connectionLock) {
-                isConnecting = false;
-            }
-            showConnectionStatus(false, "Invalid URL: " + e.getMessage());
-            addSystemMessage("Error connecting: " + e.getMessage());
-        } catch (Exception e) {
-            Log.e(TAG, "Error connecting to WebSocket: " + e.getMessage(), e);
-            connectionState = STATE_DISCONNECTED;
-            synchronized (connectionLock) {
-                isConnecting = false;
-            }
-            showConnectionStatus(false, "Error: " + e.getMessage());
-            addSystemMessage("Error connecting: " + e.getMessage());
-        }
-    }
-
-
-    private void scheduleReconnect() {
-        if (isFinishing() || isDestroyed()) {
-            return;
-        }
-
-        reconnectAttempts++;
-
-        // Calculate delay with exponential backoff, max 60 seconds
-        int delay = Math.min(60000, 1000 * (int) Math.pow(2, Math.min(reconnectAttempts, 6)));
-
-        Log.d(TAG, "Scheduling reconnect attempt #" + reconnectAttempts + " in " + (delay / 1000) + " seconds");
-        addSystemMessage("Will retry connection in " + (delay / 1000) + " seconds...");
-
-        // Use the regular postDelayed which works on all Android versions
-        mainHandler.postDelayed(() -> {
-            synchronized (connectionLock) {
-                if (!isFinishing() && !isDestroyed() && !isConnecting && connectionState == STATE_DISCONNECTED) {
-                    verifyServerConnectivity();
-                }
-            }
-        }, delay);
-    }
-
-    private String getServerUrl() {
-        String fullUrl = RetrofitClient.getInstance(this).getWebSocketBaseUrl();
-
-        // Clean up URL
-        fullUrl = fullUrl
-                .replace("http://", "")
-                .replace("https://", "")
-                .replace("ws://", "")
-                .replace("wss://", "");
-
-        // Remove trailing slashes
-        while (fullUrl.endsWith("/")) {
-            fullUrl = fullUrl.substring(0, fullUrl.length() - 1);
-        }
-
-        Log.d(TAG, "WebSocket server URL: " + fullUrl);
-        return fullUrl;
-    }
-
-    private void showConnectionStatus(boolean isConnecting, String statusText) {
-        connectionStatusView.setVisibility(View.VISIBLE);
-        connectionStatus.setText(statusText);
-        connectionProgress.setVisibility(isConnecting ? View.VISIBLE : View.GONE);
-    }
-
-    private void hideConnectionStatus() {
-        connectionStatusView.setVisibility(View.GONE);
-    }
-
-    private void addMessageToChat(ChatMessage message) {
-        // Skip unnecessary messages
-        if (shouldSkipMessage(message)) {
-            return;
-        }
-
-        // Check for duplicates by ID (improved version)
-        if (message.getMessageId() != null) {
-            if (messageIds.contains(message.getMessageId()) ||
-                    processedMessageIds.contains(message.getMessageId())) {
-                Log.d(TAG, "Skipping duplicate message with ID: " + message.getMessageId());
-                return; // Skip duplicate message
-            }
-        }
-
-        // Check for duplicate content (for messages without IDs)
-        // This is especially important for system messages and local history
-        if (message.getType() == ChatMessage.TYPE_SYSTEM ||
-                (message.getMessageId() == null && message.isHistorical())) {
-
-            // Look for similar message content in recent messages
-            for (int i = Math.max(0, chatMessages.size() - 15); i < chatMessages.size(); i++) {
-                ChatMessage existing = chatMessages.get(i);
-                if (existing.getMessage().equals(message.getMessage()) &&
-                        existing.getType() == message.getType()) {
-                    Log.d(TAG, "Skipping duplicate message content: " + message.getMessage());
-                    return; // Skip duplicate content
-                }
-            }
-        }
-
-        // Add message and update UI
-        chatMessages.add(message);
-        chatAdapter.notifyItemInserted(chatMessages.size() - 1);
-        chatRecyclerView.smoothScrollToPosition(chatMessages.size() - 1);
-
-        // Add ID to tracking set if available
-        if (message.getMessageId() != null) {
-            messageIds.add(message.getMessageId());
-        }
-    }
-
-    // Added method to filter out ping/pong messages
-    private boolean shouldSkipMessage(ChatMessage message) {
-        // Skip empty messages
-        if (TextUtils.isEmpty(message.getMessage()) && message.getType() != ChatMessage.TYPE_SYSTEM) {
-            return true;
-        }
-
-        // Skip ping/pong messages
-        String msgText = message.getMessage().toLowerCase();
-        if (msgText.equals("ping") || msgText.equals("pong")) {
-            return true;
-        }
-
-        return false;
-    }
-
-    private final List<String> recentSystemMessages = new ArrayList<>();
-    private static final int MAX_RECENT_SYSTEM_MESSAGES = 10;
-
-    private boolean isRepeatedSystemMessage(String message) {
-        // Check if this is a repetitive system message we should filter
-        if (message.contains("Connected to chat") ||
-                message.contains("Connecting to chat") ||
-                message.contains("Loaded") && message.contains("messages from history") ||
-                message.contains("Found recording") ||
-                message.contains("Local message history loaded")) {
-
-            // Check if we've seen this message recently
-            if (recentSystemMessages.contains(message)) {
-                return true;
-            }
-
-            // Add to our tracking list
-            recentSystemMessages.add(message);
-            if (recentSystemMessages.size() > MAX_RECENT_SYSTEM_MESSAGES) {
-                recentSystemMessages.remove(0);
-            }
-        }
-
-        return false;
-    }
-
-    // Then modify the addSystemMessage method:
-    private void addSystemMessage(String message) {
-        // Filter out repetitive system messages
-        if (isRepeatedSystemMessage(message)) {
-            Log.d(TAG, "Filtered repeated system message: " + message);
-            return;
-        }
-
-        // Group connection-related messages
-        if (message.contains("Connecting") || message.contains("Connected")) {
-            // If we already have a connecting message, replace it instead of adding a new one
-            for (int i = chatMessages.size() - 1; i >= Math.max(0, chatMessages.size() - 5); i--) {
-                ChatMessage existingMsg = chatMessages.get(i);
-                if (existingMsg.getType() == ChatMessage.TYPE_SYSTEM &&
-                        (existingMsg.getMessage().contains("Connecting") ||
-                                existingMsg.getMessage().contains("Connected"))) {
-
-                    // Replace instead of adding new
-                    chatMessages.set(i, new ChatMessage(
-                            message,
-                            ChatMessage.TYPE_SYSTEM,
-                            "System",
-                            getCurrentTimestamp(),
-                            null,
-                            false
-                    ));
-
-                    chatAdapter.notifyItemChanged(i);
-                    return;
-                }
-            }
-        }
-
-        ChatMessage systemMessage = new ChatMessage(
-                message,
-                ChatMessage.TYPE_SYSTEM,
-                "System",
-                getCurrentTimestamp(),
-                null,
-                false
-        );
-
-        // Always update on the main thread
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            addMessageToChat(systemMessage);
-        } else {
-            mainHandler.post(() -> addMessageToChat(systemMessage));
-        }
-    }
-
     private String getCurrentTimestamp() {
-        return android.text.format.DateFormat.format(
-                "yyyy-MM-dd HH:mm:ss",
-                new java.util.Date()
-        ).toString();
+        return android.text.format.DateFormat.format("yyyy-MM-dd HH:mm:ss", new java.util.Date()).toString();
     }
 
-    private void sendMessage(String message) {
-        if (message.trim().isEmpty()) {
-            return;
-        }
-
-        if (connectionState != STATE_CONNECTED || chatWebSocket == null) {
-            Log.d(TAG, "Not connected - queueing message");
-
-            // Save message locally
-            saveLocalMessage(message);
-
-            // Show in UI
-            ChatMessage chatMessage = new ChatMessage(
-                    message,
-                    ChatMessage.TYPE_DEVICE,
-                    "You",
-                    getCurrentTimestamp(),
-                    null,
-                    true // Mark as offline
-            );
-            addMessageToChat(chatMessage);
-
-            // Queue message
-            queuedMessages.add(message);
-
-            Toast.makeText(this, "Message saved offline", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        try {
-            // Send to server
-            chatWebSocket.sendMessage(message, deviceId);
-
-            // Add to local display immediately (will be updated when server confirms)
-            ChatMessage chatMessage = new ChatMessage(
-                    message,
-                    ChatMessage.TYPE_DEVICE,
-                    "You",
-                    getCurrentTimestamp(),
-                    null,
-                    false
-            );
-            addMessageToChat(chatMessage);
-
-            // Save locally (will be updated with server ID when received)
-            saveLocalMessage(message);
-
-        } catch (Exception e) {
-            Log.e(TAG, "Error sending message", e);
-            Toast.makeText(this, "Error sending message", Toast.LENGTH_SHORT).show();
-
-            // Add to local display as offline
-            ChatMessage chatMessage = new ChatMessage(
-                    message,
-                    ChatMessage.TYPE_DEVICE,
-                    "You",
-                    getCurrentTimestamp(),
-                    null,
-                    true
-            );
-            addMessageToChat(chatMessage);
-
-            // Save locally
-            saveLocalMessage(message);
-
-            // Queue for later
-            queuedMessages.add(message);
-        }
+    private String formatTimestamp(long timestamp) {
+        return android.text.format.DateFormat.format("yyyy-MM-dd HH:mm:ss", new java.util.Date(timestamp)).toString();
     }
 
-    private void saveLocalMessage(String message) {
-        executor.execute(() -> {
-            try {
-                RecordingRepository repository = new RecordingRepository(this);
-                repository.saveLocalChatMessage(
-                        Long.parseLong(recordingId),
-                        message,
-                        true, // isFromDevice
-                        null  // messageId (will be updated when received from server)
-                );
-            } catch (Exception e) {
-                Log.e(TAG, "Error saving message locally", e);
-            }
-        });
-    }
-
-    private void loadLocalMessages() {
-        executor.execute(() -> {
-            try {
-                RecordingRepository repository = new RecordingRepository(this);
-                List<LocalChatMessage> localMessages = repository.getLocalChatMessages(Long.parseLong(recordingId));
-
-                if (!localMessages.isEmpty()) {
-                    mainHandler.post(() -> {
-                        // ONLY show system messages when there are valid messages to display
-                        addSystemMessage("Local message history loaded");
-
-                        int validMessageCount = 0;
-                        for (LocalChatMessage msg : localMessages) {
-                            // Skip empty messages and ping/pong messages
-                            if (TextUtils.isEmpty(msg.getMessage())) {
-                                continue;
-                            }
-
-                            String messageText = msg.getMessage().toLowerCase();
-                            if (messageText.equals("ping") || messageText.equals("pong")) {
-                                continue;
-                            }
-
-                            // Skip messages we already have by ID
-                            if (msg.getMessageId() != null &&
-                                    (messageIds.contains(msg.getMessageId()) ||
-                                            processedMessageIds.contains(msg.getMessageId()))) {
-                                continue;
-                            }
-
-                            ChatMessage uiMessage = new ChatMessage(
-                                    msg.getMessage(),
-                                    msg.isFromDevice() ? ChatMessage.TYPE_DEVICE : ChatMessage.TYPE_ADMIN,
-                                    msg.isFromDevice() ? "You" : "Admin",
-                                    new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
-                                            .format(new java.util.Date(msg.getTimestamp())),
-                                    msg.getMessageId(),
-                                    true // Mark as historical
-                            );
-                            addMessageToChat(uiMessage);
-                            validMessageCount++;
-
-                            // Track this message ID to prevent duplicates
-                            if (msg.getMessageId() != null) {
-                                messageIds.add(msg.getMessageId());
-                                processedMessageIds.add(msg.getMessageId());
-                            }
-                        }
-
-                        // Log how many messages were actually added
-                        Log.d(TAG, "Added " + validMessageCount + " messages from local history");
-                    });
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "Error loading local messages", e);
-            }
-        });
-    }
-
-    // Modify the onMessageReceived method to filter system messages about history
-    private final Set<String> processedMessageIds = new HashSet<>(); // Track processed message IDs
-
-    // Modify the onMessageReceived method to be much stricter with history handling
-    @Override
-    public void onMessageReceived(String sender, String message, String timestamp,
-                                  String messageId, boolean isHistorical) {
-        // Skip empty messages
-        if (TextUtils.isEmpty(message)) {
-            return;
-        }
-
-        // Skip ping/pong messages
-        String msgLower = message.toLowerCase();
-        if (msgLower.equals("ping") || msgLower.equals("pong")) {
-            return;
-        }
-
-        // Handle system messages specially
-        if ("system".equals(sender)) {
-            // Filter special cases of system messages
-            if (message.contains("Loaded") && message.contains("messages from history")) {
-                if (initialHistoryLoaded) {
-                    Log.d(TAG, "Skipping duplicate history loaded message");
-                    return;
-                }
-                initialHistoryLoaded = true;
-            }
-
-            // Track recent system messages to avoid duplicates
-            if (isRepeatedSystemMessage(message)) {
-                Log.d(TAG, "Skipping repeated system message: " + message);
-                return;
-            }
-        }
-
-        // CRITICAL: If we receive a message with a message ID we've seen locally already,
-        // we MUST skip it to prevent duplication
-        if (messageId != null) {
-            if (messageIds.contains(messageId)) {
-                Log.d(TAG, "Skipping duplicate message with ID: " + messageId);
-                return;
-            }
-
-            // Also check the processed IDs to be extra safe
-            if (processedMessageIds.contains(messageId)) {
-                Log.d(TAG, "Skipping already processed message with ID: " + messageId);
-                return;
-            }
-        }
-
-        mainHandler.post(() -> {
-            int messageType;
-            String displaySender;
-
-            if ("admin".equals(sender)) {
-                messageType = ChatMessage.TYPE_ADMIN;
-                displaySender = "admin";
-            } else if ("system".equals(sender)) {
-                messageType = ChatMessage.TYPE_SYSTEM;
-                displaySender = "System";
-            } else {
-                messageType = ChatMessage.TYPE_DEVICE;
-                displaySender = deviceId.equals(sender) ? "You" : sender;
-            }
-
-            ChatMessage chatMessage = new ChatMessage(
-                    message,
-                    messageType,
-                    displaySender,
-                    timestamp,
-                    messageId,
-                    isHistorical
-            );
-
-            addMessageToChat(chatMessage);
-
-            // Hide typing indicator after receiving a message
-            typingIndicator.setVisibility(View.GONE);
-
-            // Save message to local database if it's from admin AND not historical
-            if (messageType == ChatMessage.TYPE_ADMIN && messageId != null && !isHistorical) {
-                executor.execute(() -> {
-                    try {
-                        RecordingRepository repository = new RecordingRepository(ChatActivity.this);
-                        repository.saveLocalChatMessage(
-                                Long.parseLong(recordingId),
-                                message,
-                                false, // Not from device
-                                messageId
-                        );
-                    } catch (Exception e) {
-                        Log.e(TAG, "Error saving admin message locally", e);
-                    }
-                });
-            }
-
-            // Add to processed IDs to prevent duplicate display
-            if (messageId != null) {
-                processedMessageIds.add(messageId);
-            }
-        });
-    }
-
-    @Override
-    public void onTypingStarted() {
-        mainHandler.post(() -> {
-            // Show typing indicator
-            typingIndicator.setVisibility(View.VISIBLE);
-
-            // Auto-hide after 5 seconds
-            mainHandler.postDelayed(() ->
-                    typingIndicator.setVisibility(View.GONE), 5000);
-        });
-    }
-
-    @Override
-    public void onConnectionStateChange(boolean connected, String message) {
-        Log.d(TAG, "Connection state changed: connected=" + connected + ", message=" + message);
-
-        mainHandler.post(() -> {
-            if (connected) {
-                synchronized (connectionLock) {
-                    isConnecting = false;
-                    reconnectAttempts = 0; // Reset on successful connection
-                }
-                connectionState = STATE_CONNECTED;
-                isConnected = true;
-                hideConnectionStatus();
-                addSystemMessage("Connected to chat");
-                updateInputState(true);
-
-                // Cancel any pending reconnection attempts
-                mainHandler.removeCallbacksAndMessages(null);
-
-                // Send any queued messages
-                if (!queuedMessages.isEmpty()) {
-                    sendQueuedMessages();
-                }
-            } else {
-                synchronized (connectionLock) {
-                    isConnecting = false;
-                }
-                connectionState = STATE_DISCONNECTED;
-                isConnected = false;
-                showConnectionStatus(false, message);
-                updateInputState(false);
-                addSystemMessage("Disconnected: " + message);
-
-                // Don't reconnect if it's an auth failure, explicit close, or if already at max attempts
-                if (!isFinishing() && !message.contains("403") && !message.contains("Authentication") &&
-                        reconnectAttempts < MAX_CONNECTION_ATTEMPTS) {
-                    scheduleReconnect();
-                } else if (reconnectAttempts >= MAX_CONNECTION_ATTEMPTS) {
-                    showConnectionStatus(false, "Max reconnection attempts reached. Please try again later.");
-                }
-            }
-        });
-    }
-
-    private void sendQueuedMessages() {
-        if (queuedMessages.isEmpty() || connectionState != STATE_CONNECTED) {
-            return;
-        }
-
-        Log.d(TAG, "Sending " + queuedMessages.size() + " queued messages");
-        List<String> toSend = new ArrayList<>(queuedMessages);
-        queuedMessages.clear();
-
-        for (String message : toSend) {
-            sendMessage(message);
-
-            // Add small delay between messages
-            try {
-                Thread.sleep(200);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }
-    }
-
-    @Override
-    public void onError(String errorMessage) {
-        mainHandler.post(() -> {
-            showConnectionStatus(false, "Error");
-            addSystemMessage("Error: " + errorMessage);
-        });
-    }
-
-    @Override
-    public String getWebSocketUrl() {
-        // Not used in this implementation
-        return "";
-    }
+    // === NETWORK RECEIVER - FIXED: Prevent multiple reconnections ===
 
     private final BroadcastReceiver networkReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
+            if (isDestroyed) return;
+
             ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
             NetworkInfo activeNetwork = cm.getActiveNetworkInfo();
             boolean hasConnectivity = activeNetwork != null && activeNetwork.isConnectedOrConnecting();
 
             Log.d(TAG, "Network connectivity changed: " + hasConnectivity);
 
-            if (hasConnectivity && connectionState == STATE_DISCONNECTED) {
-                // Network came back online, try to reconnect
-                addSystemMessage("Network connection restored. Reconnecting...");
-                reconnectAttempts = 0; // Reset attempts on new connectivity
-                verifyServerConnectivity();
-            } else if (!hasConnectivity && connectionState != STATE_DISCONNECTED) {
-                // Network went offline
-                addSystemMessage("Network connection lost. Waiting for connectivity...");
-                connectionState = STATE_DISCONNECTED;
-                showConnectionStatus(false, "No network connection");
+            if (hasConnectivity && !isConnected.get() && !isConnecting.get()) {
+                addSystemMessage("Network restored, reconnecting...");
+                reconnectAttempts = 0;
+                connectToServerSafely();
+            } else if (!hasConnectivity) {
+                addSystemMessage("Network connection lost");
+                showConnectionStatus("No network", false);
             }
         }
     };
+
+    // === LIFECYCLE METHODS ===
 
     @Override
     protected void onResume() {
         super.onResume();
 
-        // Check if we need to reconnect
-        if (connectionState == STATE_DISCONNECTED) {
-            verifyServerConnectivity();
+        // Only reconnect if not connected and not currently connecting
+        if (!isConnected.get() && !isConnecting.get() && !isDestroyed) {
+            connectToServerSafely();
         }
     }
 
     @Override
     protected void onDestroy() {
-        // Cancel all pending reconnection attempts
-        mainHandler.removeCallbacksAndMessages(null);
+        isDestroyed = true;
 
-        // Close connections
-        closeAllWebSockets();
-
-        // Reset state variables
-        initialHistoryLoaded = false;
-        recentSystemMessages.clear();
-        processedMessageIds.clear();
-        messageIds.clear();
+        // Close WebSocket connection
+        closeExistingConnectionAndWait();
 
         // Unregister network receiver
         try {
@@ -902,33 +622,20 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         // Shutdown executor
         executor.shutdownNow();
 
-        super.onDestroy();
-    }
+        // Clear handlers
+        mainHandler.removeCallbacksAndMessages(null);
 
-    // Helper method to close all WebSockets
-    private void closeAllWebSockets() {
-        // Close chat client if exists
-        if (chatWebSocket != null) {
-            try {
-                ChatWebSocketClient clientToClose = chatWebSocket;
-                chatWebSocket = null; // Clear reference first to avoid callbacks using it
-                clientToClose.closePermanently();
-            } catch (Exception e) {
-                Log.e(TAG, "Error closing chat client", e);
-            }
-        }
+        super.onDestroy();
     }
 }
 
-/**
- * Chat Adapter for RecyclerView
- */
+// [ChatAdapter and ChatMessage classes remain the same as in your original code]
 class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.ChatViewHolder> {
-    private List<ChatMessage> messages;
+    private final List<ChatMessage> messages;
 
     public ChatAdapter(List<ChatMessage> messages) {
         this.messages = messages;
-        setHasStableIds(true); // Enable stable IDs for better performance
+        setHasStableIds(true);
     }
 
     @Override
@@ -938,7 +645,6 @@ class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.ChatViewHolder> {
 
     @Override
     public long getItemId(int position) {
-        // Use message ID as stable ID if available, otherwise use position
         ChatMessage message = messages.get(position);
         if (message.getMessageId() != null) {
             try {
@@ -950,60 +656,48 @@ class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.ChatViewHolder> {
         return position;
     }
 
+    @NonNull
     @Override
-    public ChatViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+    public ChatViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
         View view;
-        if (viewType == ChatMessage.TYPE_ADMIN) {
-            view = LayoutInflater.from(parent.getContext())
-                    .inflate(R.layout.item_message_admin, parent, false);
-        } else if (viewType == ChatMessage.TYPE_SYSTEM) {
-            view = LayoutInflater.from(parent.getContext())
-                    .inflate(R.layout.item_message_system, parent, false);
-        } else {
-            view = LayoutInflater.from(parent.getContext())
-                    .inflate(R.layout.item_message_device, parent, false);
+        switch (viewType) {
+            case ChatMessage.TYPE_ADMIN:
+                view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_message_admin, parent, false);
+                break;
+            case ChatMessage.TYPE_SYSTEM:
+                view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_message_system, parent, false);
+                break;
+            default: // TYPE_DEVICE
+                view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_message_device, parent, false);
+                break;
         }
         return new ChatViewHolder(view);
     }
 
     @Override
-    public void onBindViewHolder(ChatViewHolder holder, int position) {
+    public void onBindViewHolder(@NonNull ChatViewHolder holder, int position) {
         ChatMessage message = messages.get(position);
 
-        // THIS CRUCIAL LINE WAS MISSING - Set the message text
         holder.messageText.setText(message.getMessage());
 
-        // Set the background and alignment based on message type
+        // Set message info
+        String info = message.getSender() + " • " + message.getTimestamp();
+        if (message.isHistorical()) {
+            info += " • Historical";
+        }
+        holder.infoText.setText(info);
+
+        // Set background based on message type
         switch (message.getType()) {
             case ChatMessage.TYPE_ADMIN:
-                // Admin messages should appear different from device messages
                 holder.messageText.setBackgroundResource(R.drawable.bg_message_admin);
-                String adminInfo = message.getSender() + " · " + message.getTimestamp();
-                if (message.isHistorical()) {
-                    adminInfo += " · Historical";
-                }
-                holder.infoText.setText(adminInfo);
                 break;
             case ChatMessage.TYPE_SYSTEM:
-                // System messages are centered informational messages
                 holder.messageText.setBackgroundResource(R.drawable.bg_message_system);
-                holder.infoText.setText(message.getTimestamp());
                 break;
             default:
-                // Device messages
                 holder.messageText.setBackgroundResource(R.drawable.bg_message_device);
-                String deviceInfo = "You · " + message.getTimestamp();
-                if (message.isHistorical()) {
-                    deviceInfo += " · Offline";
-                }
-                holder.infoText.setText(deviceInfo);
                 break;
-        }
-
-        // Add message ID indicator if in debug mode (can be removed in production)
-        if (BuildConfig.DEBUG && message.getMessageId() != null) {
-            String currentInfo = holder.infoText.getText().toString();
-            holder.infoText.setText(currentInfo + " · ID:" + message.getMessageId());
         }
     }
 
@@ -1022,22 +716,22 @@ class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.ChatViewHolder> {
             infoText = itemView.findViewById(R.id.info_text);
         }
     }
-
 }
 
+// === CHAT MESSAGE MODEL ===
+
 class ChatMessage {
-    public static final int TYPE_ADMIN = 2;
-    public static final int TYPE_DEVICE = 1;
+    public static final int TYPE_ADMIN = 1;
+    public static final int TYPE_DEVICE = 2;
     public static final int TYPE_SYSTEM = 3;
 
-    private String message;
-    private int type;
-    private String sender;
-    private String timestamp;
-    private String messageId; // Added field
-    private boolean isHistorical; // Added field
+    private final String message;
+    private final int type;
+    private final String sender;
+    private final String timestamp;
+    private final String messageId;
+    private final boolean isHistorical;
 
-    // Main constructor with all fields
     public ChatMessage(String message, int type, String sender, String timestamp, String messageId, boolean isHistorical) {
         this.message = message;
         this.type = type;
@@ -1047,33 +741,11 @@ class ChatMessage {
         this.isHistorical = isHistorical;
     }
 
-    // Simplified constructor for backward compatibility
-    public ChatMessage(String message, int type, String sender, String timestamp) {
-        this(message, type, sender, timestamp, null, false);
-    }
-
-    // Getters for all fields
-    public String getMessage() {
-        return message;
-    }
-
-    public int getType() {
-        return type;
-    }
-
-    public String getSender() {
-        return sender;
-    }
-
-    public String getTimestamp() {
-        return timestamp;
-    }
-
-    public String getMessageId() {
-        return messageId;
-    }
-
-    public boolean isHistorical() {
-        return isHistorical;
-    }
+    // Getters
+    public String getMessage() { return message; }
+    public int getType() { return type; }
+    public String getSender() { return sender; }
+    public String getTimestamp() { return timestamp; }
+    public String getMessageId() { return messageId; }
+    public boolean isHistorical() { return isHistorical; }
 }

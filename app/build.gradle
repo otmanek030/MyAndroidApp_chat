@@ -66,5 +66,5 @@ dependencies {
     implementation 'androidx.activity:activity-ktx:1.6.1'
 
     implementation 'org.java-websocket:Java-WebSocket:1.5.3'
-
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
 }

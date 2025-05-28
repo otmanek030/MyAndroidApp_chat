@@ -53,6 +53,9 @@ public class RecordingRepository {
                 this.apiService = null;
             }
         }
+
+        // Log database info for debugging
+        database.logDatabaseInfo();
     }
 
     // Interface for sync status callbacks
@@ -132,74 +135,49 @@ public class RecordingRepository {
         List<Recording> recordings = new ArrayList<>();
         SQLiteDatabase db = database.getReadableDatabase();
 
-        String orderBy = RecordingDatabase.COLUMN_DATE + " DESC";
-        Cursor cursor = null;
+        String query = "SELECT * FROM " + RecordingDatabase.TABLE_RECORDINGS + " ORDER BY " + RecordingDatabase.COLUMN_DATE + " DESC";
+        Cursor cursor = db.rawQuery(query, null);
 
-        try {
-            cursor = db.query(
-                    RecordingDatabase.TABLE_RECORDINGS,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    orderBy
-            );
-
-            Log.d(TAG, "Found " + cursor.getCount() + " recordings in database");
-
-            if (cursor.moveToFirst()) {
-                do {
-                    Recording recording = toRecording(cursor);
-                    recordings.add(recording);
-                    Log.d(TAG, "Loaded recording: " + recording.getTitle() +
-                            ", Type: " + recording.getType() +
-                            ", Device ID: " + recording.getDeviceId());
-                } while (cursor.moveToNext());
+        if (cursor != null) {
+            while (cursor.moveToNext()) {
+                Recording recording = createRecordingFromCursor(cursor);
+                recordings.add(recording);
             }
-        } catch (Exception e) {
-            Log.e(TAG, "Error getting all recordings", e);
-        } finally {
-            if (cursor != null) {
-                cursor.close();
-            }
+            cursor.close();
         }
 
+        db.close();
+        Log.d(TAG, "Retrieved " + recordings.size() + " recordings from local database");
         return recordings;
     }
 
     public Recording getRecording(long id) {
         SQLiteDatabase db = database.getReadableDatabase();
-
-        String selection = RecordingDatabase.COLUMN_ID + " = ?";
-        String[] selectionArgs = {String.valueOf(id)};
-
-        Cursor cursor = null;
         Recording recording = null;
 
-        try {
-            cursor = db.query(
-                    RecordingDatabase.TABLE_RECORDINGS,
-                    null,
-                    selection,
-                    selectionArgs,
-                    null,
-                    null,
-                    null
-            );
+        String query = "SELECT * FROM " + RecordingDatabase.TABLE_RECORDINGS + " WHERE " + RecordingDatabase.COLUMN_ID + " = ?";
+        Cursor cursor = db.rawQuery(query, new String[]{String.valueOf(id)});
 
-            if (cursor.moveToFirst()) {
-                recording = toRecording(cursor);
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error getting recording with ID: " + id, e);
-        } finally {
-            if (cursor != null) {
-                cursor.close();
-            }
+        if (cursor != null && cursor.moveToFirst()) {
+            recording = createRecordingFromCursor(cursor);
+            cursor.close();
         }
 
+        db.close();
         return recording;
+    }
+
+    private Recording createRecordingFromCursor(Cursor cursor) {
+        long id = cursor.getLong(cursor.getColumnIndexOrThrow(RecordingDatabase.COLUMN_ID));
+        String title = cursor.getString(cursor.getColumnIndexOrThrow(RecordingDatabase.COLUMN_TITLE));
+        String filePath = cursor.getString(cursor.getColumnIndexOrThrow(RecordingDatabase.COLUMN_FILE_PATH));
+        long duration = cursor.getLong(cursor.getColumnIndexOrThrow(RecordingDatabase.COLUMN_DURATION));
+        long createdAt = cursor.getLong(cursor.getColumnIndexOrThrow(RecordingDatabase.COLUMN_DATE));
+        String type = cursor.getString(cursor.getColumnIndexOrThrow(RecordingDatabase.COLUMN_TYPE));
+        String textContent = cursor.getString(cursor.getColumnIndexOrThrow(RecordingDatabase.COLUMN_TEXT_CONTENT));
+        String deviceId = cursor.getString(cursor.getColumnIndexOrThrow(RecordingDatabase.COLUMN_DEVICE_ID));
+
+        return new Recording(id, title, filePath, duration, createdAt, type, textContent, deviceId);
     }
 
     public boolean deleteRecording(long id) {
@@ -229,68 +207,8 @@ public class RecordingRepository {
         return result > 0;
     }
 
-    private Recording toRecording(Cursor cursor) {
-        // Existing toRecording implementation from your code
-        int idIndex = cursor.getColumnIndex(RecordingDatabase.COLUMN_ID);
-        int titleIndex = cursor.getColumnIndex(RecordingDatabase.COLUMN_TITLE);
-        int filePathIndex = cursor.getColumnIndex(RecordingDatabase.COLUMN_FILE_PATH);
-        int durationIndex = cursor.getColumnIndex(RecordingDatabase.COLUMN_DURATION);
-        int dateIndex = cursor.getColumnIndex(RecordingDatabase.COLUMN_DATE);
-        int typeIndex = cursor.getColumnIndex(RecordingDatabase.COLUMN_TYPE);
-        int textContentIndex = cursor.getColumnIndex(RecordingDatabase.COLUMN_TEXT_CONTENT);
-        int deviceIdIndex = cursor.getColumnIndex(RecordingDatabase.COLUMN_DEVICE_ID);
-
-        if (idIndex == -1 || titleIndex == -1 || dateIndex == -1) {
-            Log.e(TAG, "Required columns not found in database");
-            return null;
-        }
-
-        String type = Recording.TYPE_VOICE;
-        if (typeIndex != -1 && !cursor.isNull(typeIndex)) {
-            type = cursor.getString(typeIndex);
-        }
-
-        String textContent = null;
-        if (textContentIndex != -1 && !cursor.isNull(textContentIndex)) {
-            textContent = cursor.getString(textContentIndex);
-        }
-
-        String filePath = null;
-        if (filePathIndex != -1 && !cursor.isNull(filePathIndex)) {
-            filePath = cursor.getString(filePathIndex);
-        }
-
-        long duration = 0;
-        if (durationIndex != -1 && !cursor.isNull(durationIndex)) {
-            duration = cursor.getLong(durationIndex);
-        }
-
-        String deviceId = null;
-        if (deviceIdIndex != -1 && !cursor.isNull(deviceIdIndex)) {
-            deviceId = cursor.getString(deviceIdIndex);
-        }
-
-        Recording recording = new Recording(
-                cursor.getLong(idIndex),
-                cursor.getString(titleIndex),
-                filePath,
-                duration,
-                cursor.getLong(dateIndex),
-                type,
-                textContent,
-                deviceId
-        );
-
-        Log.d(TAG, "Created recording object: ID=" + recording.getId() +
-                ", Title=" + recording.getTitle() +
-                ", Device ID=" + recording.getDeviceId());
-
-        return recording;
-    }
-
     // -------------- SERVER API OPERATIONS --------------
 
-    // Check if network is available
     private boolean isNetworkAvailable() {
         ConnectivityManager connectivityManager = (ConnectivityManager)
                 context.getSystemService(Context.CONNECTIVITY_SERVICE);
@@ -301,7 +219,6 @@ public class RecordingRepository {
         return false;
     }
 
-    // Check if server is available
     private boolean isServerAvailable() {
         if (apiService == null) {
             try {
@@ -320,7 +237,6 @@ public class RecordingRepository {
         }
     }
 
-    // Add recording to pending uploads
     private void addToPendingUploads(long id) {
         if (!pendingUploads.contains(id)) {
             pendingUploads.add(id);
@@ -328,14 +244,10 @@ public class RecordingRepository {
         }
     }
 
-    // Remove recording from pending uploads
     private void removeFromPendingUploads(long id) {
         pendingUploads.remove(Long.valueOf(id));
         Log.d(TAG, "Removed recording ID " + id + " from pending uploads. Total pending: " + pendingUploads.size());
     }
-
-    // Upload voice recording to server
-    // In RecordingRepository.java - update the uploadVoiceRecording method
 
     private void uploadVoiceRecording(long localId, String title, File file, long duration) {
         if (apiService == null) {
@@ -346,29 +258,24 @@ public class RecordingRepository {
 
         String deviceId = DeviceIdHelper.getDeviceId(context);
 
-        // Log detailed upload attempt
         Log.d(TAG, "Attempting to upload voice recording: ID=" + localId +
                 ", Title=" + title +
                 ", File=" + (file != null ? file.getAbsolutePath() : "null") +
                 ", Size=" + (file != null ? file.length() : 0) +
                 ", Device ID=" + deviceId);
 
-        // Check if file exists and is readable
         if (file == null || !file.exists() || !file.canRead()) {
             Log.e(TAG, "File is null, doesn't exist, or can't be read");
             addToPendingUploads(localId);
             return;
         }
 
-        // Create RequestBody instances for file and metadata
         RequestBody requestFile = RequestBody.create(
                 MediaType.parse("audio/mpeg"), file);
 
-        // Create MultipartBody.Part from file
         MultipartBody.Part filePart = MultipartBody.Part.createFormData(
                 "file_path", file.getName(), requestFile);
 
-        // Create proper RequestBody objects for each parameter
         RequestBody titleBody = RequestBody.create(
                 MediaType.parse("text/plain"), title);
         RequestBody durationBody = RequestBody.create(
@@ -378,10 +285,8 @@ public class RecordingRepository {
         RequestBody typeBody = RequestBody.create(
                 MediaType.parse("text/plain"), "voice");
 
-        // Log the request details
         Log.d(TAG, "Sending request to: " + RetrofitClient.getInstance(context).getServerUrl() + "recordings/");
 
-        // Send request
         Call<RecordingDto> call = apiService.uploadVoiceRecording(
                 titleBody,
                 durationBody,
@@ -404,7 +309,6 @@ public class RecordingRepository {
                     } catch (IOException e) {
                         e.printStackTrace();
                     }
-                    // Keep in pending uploads for later retry
                     addToPendingUploads(localId);
                 }
             }
@@ -413,22 +317,17 @@ public class RecordingRepository {
             public void onFailure(Call<RecordingDto> call, Throwable t) {
                 Log.e(TAG, "Error uploading voice recording", t);
 
-                // Log detailed error info
                 if (t instanceof IOException) {
                     Log.e(TAG, "Network error: " + t.getMessage());
                 } else {
                     Log.e(TAG, "Conversion error: " + t.getMessage());
                 }
 
-                // Keep in pending uploads for later retry
                 addToPendingUploads(localId);
             }
         });
     }
 
-// Similarly update the uploadTextRecording method with better logging and error handling
-
-    // Upload text recording to server
     private void uploadTextRecording(long localId, String title, String textContent) {
         if (apiService == null) {
             Log.e(TAG, "API service not initialized");
@@ -467,7 +366,6 @@ public class RecordingRepository {
         });
     }
 
-    // Delete recording from server
     private void deleteRecordingFromServer(long id) {
         if (apiService == null) {
             Log.e(TAG, "API service not initialized");
@@ -494,7 +392,6 @@ public class RecordingRepository {
         });
     }
 
-    // Sync all local recordings with server
     public void syncAllRecordings(SyncStatusCallback callback) {
         if (!isNetworkAvailable() || !isServerAvailable()) {
             if (callback != null) {
@@ -508,7 +405,6 @@ public class RecordingRepository {
         final boolean[] syncSuccess = {true};
 
         if (localRecordings.isEmpty()) {
-            // If no recordings to sync
             if (callback != null) {
                 callback.onSyncComplete(true);
             }
@@ -530,7 +426,6 @@ public class RecordingRepository {
         }
     }
 
-    // Download all recordings from server
     public void downloadRecordingsFromServer(SyncStatusCallback callback) {
         if (!isNetworkAvailable() || !isServerAvailable()) {
             if (callback != null) {
@@ -555,10 +450,6 @@ public class RecordingRepository {
             public void onResponse(Call<List<RecordingDto>> call, Response<List<RecordingDto>> response) {
                 if (response.isSuccessful() && response.body() != null) {
                     Log.d(TAG, "Received " + response.body().size() + " recordings from server");
-                    // TODO: Implement logic to save server recordings to local database
-                    // This would involve comparing server and local recordings
-                    // and updating local database accordingly
-
                     if (callback != null) {
                         callback.onSyncComplete(true);
                     }
@@ -580,11 +471,6 @@ public class RecordingRepository {
         });
     }
 
-
-
-
-    // Sync pending uploads
-    // Add this method to the RecordingRepository class
     public void syncPendingUploads(Object o) {
         if (!isNetworkAvailable() || !isServerAvailable() || pendingUploads.isEmpty()) {
             Log.d(TAG, "Cannot sync: Network or server unavailable, or no pending uploads");
@@ -610,16 +496,9 @@ public class RecordingRepository {
         }
     }
 
-    // Add this helper method to get pending uploads count
     public int getPendingUploadsCount() {
         return pendingUploads.size();
     }
-
-
-
-
-
-    // Add this method to RecordingRepository.java
 
     public void forceUploadPending(OperationCallback callback) {
         Log.d(TAG, "Forcing upload of " + pendingUploads.size() + " pending recordings");
@@ -631,7 +510,6 @@ public class RecordingRepository {
             return;
         }
 
-        // Initialize API service if needed
         if (apiService == null) {
             try {
                 apiService = RetrofitClient.getInstance(context).getApiService();
@@ -644,7 +522,6 @@ public class RecordingRepository {
             }
         }
 
-        // Create a copy to avoid concurrent modification
         List<Long> pendingCopy = new ArrayList<>(pendingUploads);
         final int[] processed = {0};
         final boolean[] anySuccess = {false};
@@ -657,7 +534,6 @@ public class RecordingRepository {
                 continue;
             }
 
-            // Create a callback for each upload
             OperationCallback innerCallback = new OperationCallback() {
                 @Override
                 public void onSuccess() {
@@ -687,7 +563,6 @@ public class RecordingRepository {
                 }
             };
 
-            // Do the appropriate upload based on recording type
             if (recording.isTextRecording()) {
                 uploadTextRecordingWithCallback(id, recording.getTitle(), recording.getTextContent(), innerCallback);
             } else if (recording.isVoiceRecording() && recording.getFile() != null) {
@@ -698,176 +573,147 @@ public class RecordingRepository {
         }
     }
 
-    // Helper methods with callbacks
-    private void uploadVoiceRecordingWithCallback(long id, String title, File file, long duration, OperationCallback callback) {
-        // Similar to uploadVoiceRecording but with callback support
-        // [Implementation omitted for brevity - similar to the updated uploadVoiceRecording]
-    }
+    // -------------- CHAT MESSAGE METHODS --------------
 
-    private void uploadTextRecordingWithCallback(long id, String title, String textContent, OperationCallback callback) {
-        // Similar to uploadTextRecording but with callback support
-        // [Implementation omitted for brevity]
-    }
-
-    /**
-     * Save a chat message locally
-     */
-
-
-
-
-
-    /**
-     * Get all chat messages for a recording from local database
-     */
-    @SuppressLint("Range")
-    public List<LocalChatMessage> getLocalChatMessages(long recordingId) {
-        List<LocalChatMessage> messages = new ArrayList<>();
-        SQLiteDatabase db = null;
-        Cursor cursor = null;
+    public long saveLocalChatMessage(long recordingId, String message, boolean isFromDevice, String serverMessageId) {
+        SQLiteDatabase db = database.getWritableDatabase();
+        long messageId = -1;
 
         try {
-            db = database.getReadableDatabase();
-            String selection = "recording_id = ?";
-            String[] selectionArgs = {String.valueOf(recordingId)};
-            String orderBy = "timestamp ASC";
-
-            cursor = db.query(
-                    "chat_messages",
-                    null,
-                    selection,
-                    selectionArgs,
-                    null,
-                    null,
-                    orderBy
-            );
-
-            if (cursor != null && cursor.moveToFirst()) {
-                do {
-                    long id = cursor.getLong(cursor.getColumnIndex("id"));
-                    String message = cursor.getString(cursor.getColumnIndex("message"));
-                    boolean isFromDevice = cursor.getInt(cursor.getColumnIndex("is_from_device")) == 1;
-                    long timestamp = cursor.getLong(cursor.getColumnIndex("timestamp"));
-                    boolean isSynced = cursor.getInt(cursor.getColumnIndex("is_synced")) == 1;
-
-                    // Get message_id (might be null)
-                    String messageId = null;
-                    if (cursor.getColumnIndex("message_id") != -1 && !cursor.isNull(cursor.getColumnIndex("message_id"))) {
-                        messageId = cursor.getString(cursor.getColumnIndex("message_id"));
-                    }
-
-                    messages.add(new LocalChatMessage(id, recordingId, message, isFromDevice, timestamp, isSynced, messageId));
-                } while (cursor.moveToNext());
+            // Check for duplicate by server message ID
+            if (serverMessageId != null && !serverMessageId.isEmpty()) {
+                if (chatMessageExistsByServerId(db, serverMessageId)) {
+                    Log.d(TAG, "Chat message with server ID " + serverMessageId + " already exists, skipping");
+                    return -1;
+                }
             }
+
+            // Check for near-duplicate content
+            if (isDuplicateMessage(db, recordingId, message, System.currentTimeMillis(), 10000)) {
+                Log.d(TAG, "Duplicate chat message detected, skipping: " + message.substring(0, Math.min(50, message.length())));
+                return -1;
+            }
+
+            ContentValues values = new ContentValues();
+            values.put(RecordingDatabase.COLUMN_MSG_RECORDING_ID, recordingId);
+            values.put(RecordingDatabase.COLUMN_MSG_CONTENT, message);
+            values.put(RecordingDatabase.COLUMN_MSG_IS_FROM_DEVICE, isFromDevice ? 1 : 0);
+            values.put(RecordingDatabase.COLUMN_MSG_TIMESTAMP, System.currentTimeMillis());
+            values.put(RecordingDatabase.COLUMN_MSG_IS_SYNCED, serverMessageId != null ? 1 : 0);
+            values.put(RecordingDatabase.COLUMN_MSG_SERVER_ID, serverMessageId);
+            values.put(RecordingDatabase.COLUMN_MSG_SENDER_TYPE, isFromDevice ? "device" : "admin");
+
+            messageId = db.insert(RecordingDatabase.TABLE_CHAT_MESSAGES, null, values);
+            Log.d(TAG, "Saved chat message: ID=" + messageId + ", content='" + message.substring(0, Math.min(50, message.length())) + "...'");
+
         } catch (Exception e) {
-            Log.e(TAG, "Error getting local chat messages", e);
+            Log.e(TAG, "Error saving chat message", e);
         } finally {
-            if (cursor != null) {
-                cursor.close();
-            }
-            if (db != null) {
-                db.close();
-            }
+            db.close();
         }
 
-        Log.d(TAG, "Retrieved " + messages.size() + " local messages for recording " + recordingId);
+        return messageId;
+    }
+
+    public List<LocalChatMessage> getLocalChatMessages(long recordingId) {
+        List<LocalChatMessage> messages = new ArrayList<>();
+        SQLiteDatabase db = database.getReadableDatabase();
+
+        String query = "SELECT * FROM " + RecordingDatabase.TABLE_CHAT_MESSAGES +
+                " WHERE " + RecordingDatabase.COLUMN_MSG_RECORDING_ID + " = ?" +
+                " ORDER BY " + RecordingDatabase.COLUMN_MSG_TIMESTAMP + " ASC";
+
+        Cursor cursor = db.rawQuery(query, new String[]{String.valueOf(recordingId)});
+
+        if (cursor != null) {
+            while (cursor.moveToNext()) {
+                try {
+                    long id = cursor.getLong(cursor.getColumnIndexOrThrow(RecordingDatabase.COLUMN_MSG_ID));
+                    String message = cursor.getString(cursor.getColumnIndexOrThrow(RecordingDatabase.COLUMN_MSG_CONTENT));
+                    boolean isFromDevice = cursor.getInt(cursor.getColumnIndexOrThrow(RecordingDatabase.COLUMN_MSG_IS_FROM_DEVICE)) == 1;
+                    long timestamp = cursor.getLong(cursor.getColumnIndexOrThrow(RecordingDatabase.COLUMN_MSG_TIMESTAMP));
+                    boolean isSynced = cursor.getInt(cursor.getColumnIndexOrThrow(RecordingDatabase.COLUMN_MSG_IS_SYNCED)) == 1;
+                    String serverMessageId = cursor.getString(cursor.getColumnIndexOrThrow(RecordingDatabase.COLUMN_MSG_SERVER_ID));
+
+                    // Skip empty messages and ping/pong
+                    if (message == null || message.trim().isEmpty()) {
+                        continue;
+                    }
+                    String msgLower = message.toLowerCase().trim();
+                    if (msgLower.equals("ping") || msgLower.equals("pong")) {
+                        continue;
+                    }
+
+                    LocalChatMessage chatMessage = new LocalChatMessage(id, recordingId, message, isFromDevice, timestamp, isSynced, serverMessageId);
+                    messages.add(chatMessage);
+
+                } catch (Exception e) {
+                    Log.e(TAG, "Error parsing chat message from cursor", e);
+                }
+            }
+            cursor.close();
+        }
+
+        db.close();
+        Log.d(TAG, "Retrieved " + messages.size() + " chat messages for recording " + recordingId);
         return messages;
     }
 
-    public void saveLocalChatMessage(long recordingId, String message, boolean isFromDevice, String messageId) {
-        SQLiteDatabase db = database.getWritableDatabase();
-
-        ContentValues values = new ContentValues();
-        values.put("recording_id", recordingId);
-        values.put("message", message);
-        values.put("is_from_device", isFromDevice ? 1 : 0);
-        values.put("timestamp", System.currentTimeMillis());
-        values.put("is_synced", messageId != null ? 1 : 0); // Synced if we have a server ID
-
-        if (messageId != null) {
-            values.put("message_id", messageId);
-        }
-
-        long id = db.insert("chat_messages", null, values);
-        Log.d(TAG, "Saved local chat message with ID: " + id +
-                (messageId != null ? ", server message ID: " + messageId : ""));
-    }
-
-    /**
-     * Update a local message with server ID
-     */
-    public void updateLocalMessageWithServerId(long recordingId, String message, String messageId) {
-        if (messageId == null) {
-            return;
-        }
-
+    public void updateChatMessageWithServerId(long localMessageId, String serverMessageId) {
         SQLiteDatabase db = database.getWritableDatabase();
 
         try {
-            // Find the most recent outgoing message with this content
-            Cursor cursor = db.query(
-                    "chat_messages",
-                    new String[]{"id"},
-                    "recording_id = ? AND message = ? AND is_from_device = 1 AND message_id IS NULL",
-                    new String[]{String.valueOf(recordingId), message},
-                    null,
-                    null,
-                    "timestamp DESC",
-                    "1"
+            ContentValues values = new ContentValues();
+            values.put(RecordingDatabase.COLUMN_MSG_SERVER_ID, serverMessageId);
+            values.put(RecordingDatabase.COLUMN_MSG_IS_SYNCED, 1);
+
+            int rowsUpdated = db.update(
+                    RecordingDatabase.TABLE_CHAT_MESSAGES,
+                    values,
+                    RecordingDatabase.COLUMN_MSG_ID + " = ?",
+                    new String[]{String.valueOf(localMessageId)}
             );
 
-            if (cursor != null && cursor.moveToFirst()) {
-                long localId = cursor.getLong(0);
-                cursor.close();
+            Log.d(TAG, "Updated " + rowsUpdated + " chat message(s) with server ID: " + serverMessageId);
 
-                // Update with server ID
-                ContentValues values = new ContentValues();
-                values.put("message_id", messageId);
-                values.put("is_synced", 1);
+        } catch (Exception e) {
+            Log.e(TAG, "Error updating chat message with server ID", e);
+        } finally {
+            db.close();
+        }
+    }
 
-                int updated = db.update(
-                        "chat_messages",
-                        values,
-                        "id = ?",
-                        new String[]{String.valueOf(localId)}
-                );
+    public int getUnsyncedChatMessageCount() {
+        SQLiteDatabase db = database.getReadableDatabase();
+        int count = 0;
 
-                Log.d(TAG, "Updated local message " + localId + " with server ID " + messageId +
-                        ", update count: " + updated);
-            } else {
-                if (cursor != null) {
-                    cursor.close();
-                }
+        String query = "SELECT COUNT(*) FROM " + RecordingDatabase.TABLE_CHAT_MESSAGES +
+                " WHERE " + RecordingDatabase.COLUMN_MSG_IS_SYNCED + " = 0";
 
-                // If we couldn't find a matching message, save it as a new one
-                saveLocalChatMessage(recordingId, message, true, messageId);
+        Cursor cursor = db.rawQuery(query, null);
+        if (cursor != null) {
+            if (cursor.moveToFirst()) {
+                count = cursor.getInt(0);
             }
-        } catch (Exception e) {
-            Log.e(TAG, "Error updating local message with server ID", e);
+            cursor.close();
         }
+
+        db.close();
+        return count;
     }
 
-    /**
-     * Delete local chat messages for a recording
-     */
-    public void deleteLocalChatMessages(long recordingId) {
+    public void clearAllChatMessages() {
         SQLiteDatabase db = database.getWritableDatabase();
-
         try {
-            int deleted = db.delete(
-                    "chat_messages",
-                    "recording_id = ?",
-                    new String[]{String.valueOf(recordingId)}
-            );
-            Log.d(TAG, "Deleted " + deleted + " local chat messages for recording " + recordingId);
+            int deletedRows = db.delete(RecordingDatabase.TABLE_CHAT_MESSAGES, null, null);
+            Log.d(TAG, "Cleared " + deletedRows + " chat messages");
         } catch (Exception e) {
-            Log.e(TAG, "Error deleting local chat messages", e);
+            Log.e(TAG, "Error clearing chat messages", e);
+        } finally {
+            db.close();
         }
     }
 
-    /**
-     * Check if there are unsent messages for a recording
-     */
     public boolean hasUnsentMessages(long recordingId) {
         SQLiteDatabase db = database.getReadableDatabase();
         boolean hasUnsent = false;
@@ -875,9 +721,11 @@ public class RecordingRepository {
 
         try {
             cursor = db.query(
-                    "chat_messages",
+                    RecordingDatabase.TABLE_CHAT_MESSAGES,
                     new String[]{"COUNT(*)"},
-                    "recording_id = ? AND is_from_device = 1 AND is_synced = 0",
+                    RecordingDatabase.COLUMN_MSG_RECORDING_ID + " = ? AND " +
+                            RecordingDatabase.COLUMN_MSG_IS_FROM_DEVICE + " = 1 AND " +
+                            RecordingDatabase.COLUMN_MSG_IS_SYNCED + " = 0",
                     new String[]{String.valueOf(recordingId)},
                     null,
                     null,
@@ -893,9 +741,56 @@ public class RecordingRepository {
             if (cursor != null) {
                 cursor.close();
             }
+            db.close();
         }
 
         return hasUnsent;
     }
 
+    // -------------- HELPER METHODS --------------
+
+    private boolean chatMessageExistsByServerId(SQLiteDatabase db, String serverMessageId) {
+        String query = "SELECT 1 FROM " + RecordingDatabase.TABLE_CHAT_MESSAGES +
+                " WHERE " + RecordingDatabase.COLUMN_MSG_SERVER_ID + " = ? LIMIT 1";
+
+        Cursor cursor = db.rawQuery(query, new String[]{serverMessageId});
+        boolean exists = cursor != null && cursor.moveToFirst();
+        if (cursor != null) {
+            cursor.close();
+        }
+
+        return exists;
+    }
+
+    private boolean isDuplicateMessage(SQLiteDatabase db, long recordingId, String message, long timestamp, long timeWindowMs) {
+        String query = "SELECT 1 FROM " + RecordingDatabase.TABLE_CHAT_MESSAGES +
+                " WHERE " + RecordingDatabase.COLUMN_MSG_RECORDING_ID + " = ?" +
+                " AND " + RecordingDatabase.COLUMN_MSG_CONTENT + " = ?" +
+                " AND ABS(" + RecordingDatabase.COLUMN_MSG_TIMESTAMP + " - ?) < ?" +
+                " LIMIT 1";
+
+        Cursor cursor = db.rawQuery(query, new String[]{
+                String.valueOf(recordingId),
+                message,
+                String.valueOf(timestamp),
+                String.valueOf(timeWindowMs)
+        });
+
+        boolean isDuplicate = cursor != null && cursor.moveToFirst();
+        if (cursor != null) {
+            cursor.close();
+        }
+
+        return isDuplicate;
+    }
+
+    private void uploadVoiceRecordingWithCallback(long id, String title, File file, long duration, OperationCallback callback) {
+        // Implementation similar to uploadVoiceRecording but with callback support
+        // [Omitted for brevity]
+    }
+
+    private void uploadTextRecordingWithCallback(long id, String title, String textContent, OperationCallback callback) {
+        // Implementation similar to uploadTextRecording but with callback support
+        // [Omitted for brevity]
+    }
 }
