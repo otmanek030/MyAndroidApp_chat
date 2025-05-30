@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Access app-specific internal storage -->
+    <files-path name="internal_files" path="." />
+
+    <!-- Access app-specific databases -->
+    <files-path name="databases" path="databases/" />
+
+    <!-- Access app cache directory -->
+    <cache-path name="cache" path="." />
+
+    <!-- Access root of external storage -->
+    <external-path name="external_files" path="." />
+
+    <!-- Access entire filesystem (use with caution) -->
+    <root-path name="root" path="." />
+</paths>
