@@ -1,34 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
-
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:paddingLeft="32dp"
-    android:paddingRight="32dp"
-    android:paddingTop="4dp"
-    android:paddingBottom="4dp"
-    android:gravity="center">
+    android:orientation="horizontal"
+    android:gravity="center"
+    android:layout_marginVertical="@dimen/spacing_s">
 
-    <TextView
-        android:id="@+id/message_text"
+    <!-- System Message Card -->
+    <com.google.android.material.card.MaterialCardView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:background="@drawable/bg_message_system"
-        android:padding="8dp"
-        android:textColor="#757575"
-        android:textSize="14sp"
-        tools:text="This is a system message" />
+        android:layout_marginHorizontal="@dimen/spacing_xl"
+        app:cardCornerRadius="@dimen/card_corner_radius"
+        app:cardElevation="0dp"
+        app:cardBackgroundColor="@color/tertiary_container"
+        app:strokeWidth="0dp">
 
-    <TextView
-        android:id="@+id/info_text"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:textColor="#AAAAAA"
-        android:textSize="10sp"
-        tools:text="12:34"
-        tools:ignore="SmallSp" />
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="@dimen/spacing_s">
+
+            <ImageView
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:src="@drawable/ic_info"
+                app:tint="@color/on_tertiary_container"
+                android:layout_marginEnd="@dimen/spacing_s" />
+
+            <TextView
+                android:id="@+id/message_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+                android:textColor="@color/on_tertiary_container"
+                android:maxWidth="240dp"
+                android:textAlignment="center"
+                tools:text="Connected to chat server" />
+
+        </LinearLayout>
+
+    </com.google.android.material.card.MaterialCardView>
 
 </LinearLayout>

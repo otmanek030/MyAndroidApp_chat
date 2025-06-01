@@ -1,158 +1,305 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    tools:context=".ChatActivity">
+    android:background="@color/surface">
 
-    <androidx.appcompat.widget.Toolbar
-        android:id="@+id/toolbar"
+    <!-- App Bar -->
+    <com.google.android.material.appbar.AppBarLayout
+        android:id="@+id/app_bar_layout"
         android:layout_width="match_parent"
-        android:layout_height="?attr/actionBarSize"
-        android:background="?attr/colorPrimary"
-        android:elevation="4dp"
-        android:theme="@style/ThemeOverlay.AppCompat.Dark.ActionBar"
-        app:layout_constraintTop_toTopOf="parent"
-        app:popupTheme="@style/ThemeOverlay.AppCompat.Light"
-        app:title="Chat" />
-
-    <!-- Connection Status -->
-    <androidx.cardview.widget.CardView
-        android:id="@+id/connection_status_container"
-        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_margin="8dp"
-        android:visibility="gone"
-        app:cardBackgroundColor="#FFF3CD"
-        app:cardCornerRadius="8dp"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/toolbar">
+        android:elevation="4dp"
+        app:liftOnScroll="false">
 
-        <LinearLayout
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            android:background="@color/surface"
+            app:navigationIcon="@drawable/ic_arrow_back"
+            app:navigationIconTint="@color/on_surface">
+
+            <!-- Custom Toolbar Content -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingEnd="@dimen/spacing_m">
+
+                <!-- Recording Info -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:layout_marginEnd="@dimen/spacing_m">
+
+                    <TextView
+                        android:id="@+id/recording_title"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                        android:textColor="@color/on_surface"
+                        android:ellipsize="end"
+                        android:maxLines="1"
+                        tools:text="Recording Title" />
+
+                    <TextView
+                        android:id="@+id/connection_status"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                        android:textColor="@color/on_surface_variant"
+                        tools:text="Connected" />
+
+                </LinearLayout>
+
+                <!-- Connection Indicator -->
+                <View
+                    android:id="@+id/connection_indicator"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:background="@drawable/circle_indicator_connected"
+                    android:layout_marginEnd="@dimen/spacing_m" />
+
+                <!-- Options Menu -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/options_button"
+                    style="@style/Widget.Material3.Button.IconButton"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    app:icon="@drawable/ic_more_vert"
+                    app:iconTint="@color/on_surface" />
+
+            </LinearLayout>
+
+        </com.google.android.material.appbar.MaterialToolbar>
+
+        <!-- Connection Status Banner -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/connection_status_container"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:padding="12dp">
+            android:layout_margin="8dp"
+            android:visibility="gone"
+            app:cardCornerRadius="12dp"
+            app:cardBackgroundColor="@color/warning_container"
+            app:cardElevation="0dp">
 
-            <ProgressBar
-                android:id="@+id/connection_progress"
-                style="?android:attr/progressBarStyleSmall"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:layout_marginEnd="12dp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:padding="16dp">
+
+                <ProgressBar
+                    android:id="@+id/connection_progress"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_marginEnd="8dp"
+                    android:indeterminate="true"
+                    android:visibility="gone" />
+
+                <ImageView
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:src="@drawable/ic_wifi_off"
+                    app:tint="@color/on_warning_container"
+                    android:layout_marginEnd="8dp" />
+
+                <TextView
+                    android:id="@+id/connection_message"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Connection lost"
+                    android:textSize="14sp"
+                    android:textColor="@color/on_warning_container" />
+
+                <Button
+                    android:id="@+id/retry_button"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Retry"
+                    android:textColor="@color/on_warning_container"
+                    android:minWidth="0dp"
+                    android:paddingHorizontal="16dp"
+                    style="@style/Widget.Material3.Button.TextButton" />
+
+            </LinearLayout>
+
+        </com.google.android.material.card.MaterialCardView>
+
+    </com.google.android.material.appbar.AppBarLayout>
+
+    <!-- Chat Messages Container -->
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        app:layout_behavior="@string/appbar_scrolling_view_behavior">
+
+        <!-- Messages RecyclerView -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/chat_recycler_view"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:clipToPadding="false"
+            android:paddingHorizontal="@dimen/spacing_m"
+            android:paddingTop="@dimen/spacing_m"
+            android:paddingBottom="@dimen/spacing_l"
+            app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
+            app:stackFromEnd="true"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toTopOf="@id/typing_indicator"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            tools:listitem="@layout/item_message_device" />
+
+        <!-- Empty State -->
+        <LinearLayout
+            android:id="@+id/empty_state"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:visibility="gone"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent"
+            tools:visibility="visible">
+
+            <ImageView
+                android:layout_width="120dp"
+                android:layout_height="120dp"
+                android:src="@drawable/ic_chat_empty"
+                app:tint="@color/on_surface_variant"
+                android:alpha="0.6"
+                android:layout_marginBottom="@dimen/spacing_l" />
 
             <TextView
-                android:id="@+id/connection_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/no_messages_yet"
+                android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
+                android:textColor="@color/on_surface_variant"
+                android:layout_marginBottom="@dimen/spacing_s" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/start_conversation_hint"
+                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                android:textColor="@color/on_surface_variant"
+                android:textAlignment="center"
+                android:alpha="0.8" />
+
+        </LinearLayout>
+
+        <!-- Typing Indicator -->
+        <LinearLayout
+            android:id="@+id/typing_indicator"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="@dimen/spacing_m"
+            android:visibility="gone"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintBottom_toTopOf="@id/input_container"
+            tools:visibility="visible">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/typing"
+                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                android:textColor="@color/on_surface_variant"
+                android:textStyle="italic" />
+
+            <com.google.android.material.progressindicator.CircularProgressIndicator
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:layout_marginStart="@dimen/spacing_s"
+                app:indicatorSize="16dp"
+                app:trackThickness="2dp"
+                app:indicatorColor="@color/primary"
+                android:indeterminate="true" />
+
+        </LinearLayout>
+
+        <!-- Message Input Container -->
+        <LinearLayout
+            android:id="@+id/input_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:padding="@dimen/spacing_m"
+            android:background="@color/surface"
+            android:elevation="8dp"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <!-- Message Input -->
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/message_input_layout"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Connecting to server..."
-                android:textColor="#856404" />
+                android:layout_marginEnd="@dimen/spacing_s"
+                app:boxBackgroundMode="outline"
+                app:boxCornerRadiusBottomEnd="@dimen/message_input_corner_radius"
+                app:boxCornerRadiusBottomStart="@dimen/message_input_corner_radius"
+                app:boxCornerRadiusTopEnd="@dimen/message_input_corner_radius"
+                app:boxCornerRadiusTopStart="@dimen/message_input_corner_radius"
+                app:boxStrokeWidth="1dp"
+                app:boxStrokeColor="@color/outline"
+                app:hintEnabled="false">
 
-            <Button
-                android:id="@+id/retry_button"
-                style="@style/Widget.AppCompat.Button.Borderless"
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/message_input"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="@string/type_message_hint"
+                    android:maxLines="4"
+                    android:minHeight="48dp"
+                    android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+                    android:textColor="@color/on_surface"
+                    android:textColorHint="@color/on_surface_variant"
+                    android:background="@android:color/transparent"
+                    android:paddingStart="@dimen/spacing_m"
+                    android:paddingEnd="@dimen/spacing_m"
+                    android:paddingTop="@dimen/spacing_s"
+                    android:paddingBottom="@dimen/spacing_s"
+                    android:inputType="textCapSentences|textMultiLine" />
+
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <!-- Send Button -->
+            <com.google.android.material.floatingactionbutton.FloatingActionButton
+                android:id="@+id/send_button"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:minWidth="0dp"
-                android:text="Retry"
-                android:textColor="#007BFF" />
+                android:contentDescription="@string/send_message"
+                app:fabSize="mini"
+                app:srcCompat="@drawable/ic_send"
+                app:tint="@color/on_primary"
+                app:backgroundTint="@color/primary"
+                app:elevation="2dp"
+                app:borderWidth="0dp"
+                android:enabled="false" />
+
         </LinearLayout>
-    </androidx.cardview.widget.CardView>
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/chat_recycler_view"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:clipToPadding="false"
-        android:paddingVertical="8dp"
-        app:layout_constraintBottom_toTopOf="@id/typing_indicator"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/connection_status_container"
-        tools:listitem="@layout/item_message_device" />
 
-    <!-- Typing Indicator -->
-    <TextView
-        android:id="@+id/typing_indicator"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginHorizontal="16dp"
-        android:layout_marginBottom="8dp"
-        android:text="Admin is typing..."
-        android:textColor="@android:color/darker_gray"
-        android:textStyle="italic"
-        android:visibility="gone"
-        app:layout_constraintBottom_toTopOf="@id/input_layout"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
+    </androidx.constraintlayout.widget.ConstraintLayout>
 
-    <!-- Input Layout -->
-    <LinearLayout
-        android:id="@+id/input_layout"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:background="@android:color/white"
-        android:elevation="2dp"
-        android:orientation="horizontal"
-        android:padding="8dp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent">
-
-        <EditText
-            android:id="@+id/message_input"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:background="@drawable/rounded_edit_text"
-            android:hint="Type a message..."
-            android:inputType="textMultiLine"
-            android:maxLines="4"
-            android:minHeight="48dp"
-            android:paddingHorizontal="16dp"
-            android:paddingVertical="12dp" />
-
-        <Button
-            android:id="@+id/send_button"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:text="Send"
-            android:textColor="@android:color/white" />
-
-        <Button
-            android:id="@+id/confirm_device_button"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_margin="16dp"
-            android:text="Confirm This Device"
-            android:visibility="gone"
-            android:backgroundTint="@color/colorPrimary"
-            android:textColor="@android:color/white"
-            android:drawableStart="@drawable/ic_sync" />
-    </LinearLayout>
-
-    <!-- Scroll View for content not in RecyclerView -->
-    <ScrollView
-        android:id="@+id/scroll_view"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:visibility="gone"
-        app:layout_constraintBottom_toTopOf="@id/input_layout"
-        app:layout_constraintTop_toBottomOf="@id/toolbar">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="16dp">
-
-            <!-- Content will be added dynamically -->
-        </LinearLayout>
-    </ScrollView>
-
-</androidx.constraintlayout.widget.ConstraintLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

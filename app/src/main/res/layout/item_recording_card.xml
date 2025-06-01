@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/recording_card"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginVertical="@dimen/spacing_xs"
+    android:clickable="true"
+    android:focusable="true"
+    android:foreground="?attr/selectableItemBackground"
+    app:cardCornerRadius="@dimen/card_corner_radius"
+    app:cardElevation="@dimen/card_elevation_small"
+    app:strokeWidth="0dp">
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="@dimen/spacing_m">
+
+        <!-- Type Icon Background -->
+        <View
+            android:id="@+id/icon_background"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/circle_background_primary"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <!-- Type Icon -->
+        <ImageView
+            android:id="@+id/type_icon"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:src="@drawable/ic_mic"
+            app:tint="@color/primary"
+            app:layout_constraintBottom_toBottomOf="@id/icon_background"
+            app:layout_constraintEnd_toEndOf="@id/icon_background"
+            app:layout_constraintStart_toStartOf="@id/icon_background"
+            app:layout_constraintTop_toTopOf="@id/icon_background"
+            tools:src="@drawable/ic_mic" />
+
+        <!-- Recording Title -->
+        <TextView
+            android:id="@+id/title_text_view"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/spacing_m"
+            android:layout_marginEnd="@dimen/spacing_m"
+            android:ellipsize="end"
+            android:maxLines="2"
+            android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+            android:textColor="@color/on_surface"
+            android:textStyle="bold"
+            app:layout_constraintEnd_toStartOf="@id/play_button"
+            app:layout_constraintStart_toEndOf="@id/icon_background"
+            app:layout_constraintTop_toTopOf="@id/icon_background"
+            tools:text="Recording title here" />
+
+        <!-- Recording Type Badge -->
+        <TextView
+            android:id="@+id/type_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/spacing_m"
+            android:layout_marginTop="@dimen/spacing_xs"
+            android:background="@drawable/badge_background"
+            android:paddingHorizontal="@dimen/spacing_s"
+            android:paddingVertical="@dimen/spacing_xs"
+            android:text="@string/voice"
+            android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+            android:textColor="@color/primary"
+            app:layout_constraintStart_toEndOf="@id/icon_background"
+            app:layout_constraintTop_toBottomOf="@id/title_text_view"
+            tools:text="Voice" />
+
+        <!-- Duration -->
+        <TextView
+            android:id="@+id/duration_text_view"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/spacing_s"
+            android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+            android:textColor="@color/on_surface_variant"
+            app:layout_constraintBottom_toBottomOf="@id/type_badge"
+            app:layout_constraintStart_toEndOf="@id/type_badge"
+            app:layout_constraintTop_toTopOf="@id/type_badge"
+            tools:text="02:30" />
+
+        <!-- Date -->
+        <TextView
+            android:id="@+id/date_text_view"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/spacing_m"
+            android:layout_marginTop="@dimen/spacing_xs"
+            android:layout_marginEnd="@dimen/spacing_m"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:textColor="@color/on_surface_variant"
+            app:layout_constraintEnd_toStartOf="@id/more_button"
+            app:layout_constraintStart_toEndOf="@id/icon_background"
+            app:layout_constraintTop_toBottomOf="@id/type_badge"
+            tools:text="Today, 10:30 AM" />
+
+        <!-- Play Button -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/play_button"
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:insetLeft="0dp"
+            android:insetTop="0dp"
+            android:insetRight="0dp"
+            android:insetBottom="0dp"
+            app:icon="@drawable/ic_play"
+            app:iconGravity="textEnd"
+            app:iconSize="24dp"
+            app:iconTint="@color/primary"
+            app:layout_constraintEnd_toStartOf="@id/more_button"
+            app:layout_constraintTop_toTopOf="@id/icon_background"
+            tools:icon="@drawable/ic_play" />
+
+        <!-- More Options Button -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/more_button"
+            style="@style/Widget.Material3.Button.IconButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:insetLeft="0dp"
+            android:insetTop="0dp"
+            android:insetRight="0dp"
+            android:insetBottom="0dp"
+            app:icon="@drawable/ic_more_vert"
+            app:iconGravity="textEnd"
+            app:iconSize="24dp"
+            app:iconTint="@color/on_surface_variant"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="@id/icon_background" />
+
+        <!-- Sync Status Indicator -->
+        <ImageView
+            android:id="@+id/sync_indicator"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:src="@drawable/ic_sync_disabled"
+            android:visibility="gone"
+            app:tint="@color/on_surface_variant"
+            app:layout_constraintBottom_toBottomOf="@id/date_text_view"
+            app:layout_constraintEnd_toEndOf="@id/date_text_view"
+            app:layout_constraintTop_toTopOf="@id/date_text_view"
+            tools:visibility="visible" />
+
+        <!-- Progress Bar (for sync) -->
+        <com.google.android.material.progressindicator.LinearProgressIndicator
+            android:id="@+id/sync_progress"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/spacing_s"
+            android:visibility="gone"
+            app:indicatorColor="@color/primary"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/date_text_view"
+            tools:visibility="visible" />
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+</com.google.android.material.card.MaterialCardView>

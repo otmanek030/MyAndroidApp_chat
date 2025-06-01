@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginVertical="@dimen/spacing_s"
+    android:clickable="true"
+    android:focusable="true"
+    android:foreground="?attr/selectableItemBackground"
+    style="@style/Widget.AudioRecorder.Card">
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="@dimen/spacing_l">
+
+        <!-- Checklist Icon -->
+        <View
+            android:id="@+id/icon_background"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:background="@drawable/circle_background_primary"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <ImageView
+            android:id="@+id/checklist_icon"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:src="@drawable/ic_checklist"
+            app:tint="@color/primary"
+            app:layout_constraintBottom_toBottomOf="@id/icon_background"
+            app:layout_constraintEnd_toEndOf="@id/icon_background"
+            app:layout_constraintStart_toStartOf="@id/icon_background"
+            app:layout_constraintTop_toTopOf="@id/icon_background" />
+
+        <!-- Mandatory Badge -->
+        <TextView
+            android:id="@+id/mandatory_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/badge_background_error"
+            android:paddingHorizontal="@dimen/spacing_s"
+            android:paddingVertical="@dimen/spacing_xs"
+            android:text="@string/mandatory"
+            android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+            android:textColor="@color/on_error_container"
+            android:visibility="gone"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            tools:visibility="visible" />
+
+        <!-- Checklist Title -->
+        <TextView
+            android:id="@+id/checklist_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/spacing_m"
+            android:layout_marginEnd="@dimen/spacing_m"
+            android:ellipsize="end"
+            android:maxLines="2"
+            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+            android:textColor="@color/on_surface"
+            app:layout_constraintEnd_toStartOf="@id/mandatory_badge"
+            app:layout_constraintStart_toEndOf="@id/icon_background"
+            app:layout_constraintTop_toTopOf="@id/icon_background"
+            tools:text="Safety Inspection Checklist" />
+
+        <!-- Description -->
+        <TextView
+            android:id="@+id/checklist_description"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/spacing_m"
+            android:layout_marginTop="@dimen/spacing_xs"
+            android:layout_marginEnd="@dimen/spacing_m"
+            android:ellipsize="end"
+            android:maxLines="3"
+            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+            android:textColor="@color/on_surface_variant"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toEndOf="@id/icon_background"
+            app:layout_constraintTop_toBottomOf="@id/checklist_title"
+            tools:text="Complete this checklist before starting your work shift to ensure safety compliance." />
+
+        <!-- Checklist Metadata -->
+        <LinearLayout
+            android:id="@+id/metadata_layout"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/spacing_m"
+            android:layout_marginTop="@dimen/spacing_m"
+            android:layout_marginEnd="@dimen/spacing_m"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            app:layout_constraintEnd_toStartOf="@id/start_checklist_button"
+            app:layout_constraintStart_toEndOf="@id/icon_background"
+            app:layout_constraintTop_toBottomOf="@id/checklist_description">
+
+            <!-- Version Badge -->
+            <TextView
+                android:id="@+id/checklist_version"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/badge_background_neutral"
+                android:paddingHorizontal="@dimen/spacing_s"
+                android:paddingVertical="@dimen/spacing_xs"
+                android:textAppearance="@style/TextAppearance.Material3.LabelSmall"
+                android:textColor="@color/on_surface_variant"
+                tools:text="v1.2" />
+
+            <!-- Question Count -->
+            <TextView
+                android:id="@+id/checklist_question_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/spacing_s"
+                android:drawablePadding="@dimen/spacing_xs"
+                android:gravity="center_vertical"
+                android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+                android:textColor="@color/on_surface_variant"
+                app:drawableStartCompat="@drawable/ic_help"
+                app:drawableTint="@color/on_surface_variant"
+                tools:text="12 questions" />
+
+            <!-- Estimated Time -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="@dimen/spacing_m"
+                android:drawablePadding="@dimen/spacing_xs"
+                android:gravity="center_vertical"
+                android:text="@string/estimated_time_5_min"
+                android:textAppearance="@style/TextAppearance.Material3.LabelMedium"
+                android:textColor="@color/on_surface_variant"
+                app:drawableStartCompat="@drawable/ic_schedule"
+                app:drawableTint="@color/on_surface_variant" />
+
+        </LinearLayout>
+
+        <!-- Start Button -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/start_checklist_button"
+            style="@style/Widget.AudioRecorder.Button.Primary"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/start"
+            app:icon="@drawable/ic_play_arrow"
+            app:layout_constraintBottom_toBottomOf="@id/metadata_layout"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="@id/metadata_layout" />
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+</com.google.android.material.card.MaterialCardView>

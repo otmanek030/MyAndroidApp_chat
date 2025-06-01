@@ -1,5 +1,3 @@
-// ChatActivity.java - VERSION COMPLÈTE ET FONCTIONNELLE
-
 package com.plcoding.audiorecorder;
 
 import android.content.BroadcastReceiver;
@@ -27,6 +25,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.plcoding.audiorecorder.api.ChatWebSocketClient;
 import com.plcoding.audiorecorder.api.RetrofitClient;
 import com.plcoding.audiorecorder.data.Recording;
@@ -36,7 +35,6 @@ import com.plcoding.audiorecorder.utils.DeviceIdHelper;
 import org.json.JSONObject;
 
 import java.net.URISyntaxException;
-import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -62,11 +60,11 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
     private RecyclerView chatRecyclerView;
     private ChatAdapter chatAdapter;
     private EditText messageInput;
-    private Button sendButton;
+    private FloatingActionButton sendButton;  // ✅ This is correct - it's a FAB in the layout
     private TextView connectionStatus;
     private ProgressBar connectionProgress;
     private View connectionStatusContainer;
-    private Button retryButton;
+    private Button retryButton;  // ✅ FIXED: This should be Button, not FloatingActionButton
 
     // Data
     private final List<ChatMessage> chatMessages = new ArrayList<>();
@@ -171,27 +169,50 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
                 try (Response response = client.newCall(request).execute()) {
                     if (response.isSuccessful() && response.body() != null) {
                         String responseBody = response.body().string();
+                        Log.d(TAG, "Server time response: " + responseBody);
+
                         JSONObject jsonResponse = new JSONObject(responseBody);
 
                         if ("success".equals(jsonResponse.getString("status"))) {
-                            // Parse server time
-                            String serverTimeStr = jsonResponse.getString("server_time_local");
-                            Date serverTime = parseServerTime(serverTimeStr);
-                            Date deviceTime = new Date();
+                            // Try multiple field names for server time
+                            String serverTimeStr = null;
 
-                            if (serverTime != null) {
-                                serverTimeOffset = serverTime.getTime() - deviceTime.getTime();
-                                timezoneSynced = true;
-
-                                Log.d(TAG, "✅ Timezone sync successful:");
-                                Log.d(TAG, "  Server time: " + serverTime);
-                                Log.d(TAG, "  Device time: " + deviceTime);
-                                Log.d(TAG, "  Offset: " + serverTimeOffset + "ms (" + (serverTimeOffset/1000/60/60) + " hours)");
+                            if (jsonResponse.has("server_time_local")) {
+                                serverTimeStr = jsonResponse.getString("server_time_local");
+                            } else if (jsonResponse.has("server_time")) {
+                                serverTimeStr = jsonResponse.getString("server_time");
+                            } else if (jsonResponse.has("server_time_formatted")) {
+                                serverTimeStr = jsonResponse.getString("server_time_formatted");
+                            } else if (jsonResponse.has("local_time")) {
+                                serverTimeStr = jsonResponse.getString("local_time");
                             }
+
+                            if (serverTimeStr != null) {
+                                Date serverTime = parseServerTime(serverTimeStr);
+                                Date deviceTime = new Date();
+
+                                if (serverTime != null) {
+                                    serverTimeOffset = serverTime.getTime() - deviceTime.getTime();
+                                    timezoneSynced = true;
+
+                                    Log.d(TAG, "✅ Timezone sync successful:");
+                                    Log.d(TAG, "  Server time: " + serverTime);
+                                    Log.d(TAG, "  Device time: " + deviceTime);
+                                    Log.d(TAG, "  Offset: " + serverTimeOffset + "ms (" + (serverTimeOffset/1000/60/60) + " hours)");
+                                } else {
+                                    Log.w(TAG, "Failed to parse server time: " + serverTimeStr);
+                                }
+                            } else {
+                                Log.w(TAG, "No valid time field found in server response");
+                            }
+                        } else {
+                            Log.w(TAG, "Server response status not success");
                         }
+                    } else {
+                        Log.w(TAG, "Server time API not available, using local time");
                     }
                 } catch (Exception e) {
-                    Log.e(TAG, "❌ Error syncing server timezone", e);
+                    Log.w(TAG, "Server time sync failed, continuing with local time: " + e.getMessage());
                 }
 
                 mainHandler.post(() -> {
@@ -201,7 +222,7 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
                 });
 
             } catch (Exception e) {
-                Log.e(TAG, "❌ Error in timezone sync", e);
+                Log.w(TAG, "Error in timezone sync, using local time: " + e.getMessage());
                 mainHandler.post(() -> {
                     if (callback != null) {
                         callback.run();
@@ -225,17 +246,16 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         }
     }
 
-
-    // ✅ COMPLETE initializeViews METHOD
+    // ✅ FIXED initializeViews METHOD
     private void initializeViews() {
-        // Find views
+        // Find views - ✅ FIXED: Use correct types
         chatRecyclerView = findViewById(R.id.chat_recycler_view);
         messageInput = findViewById(R.id.message_input);
-        sendButton = findViewById(R.id.send_button);
+        sendButton = findViewById(R.id.send_button);  // FloatingActionButton
         connectionStatus = findViewById(R.id.connection_status);
         connectionProgress = findViewById(R.id.connection_progress);
         connectionStatusContainer = findViewById(R.id.connection_status_container);
-        retryButton = findViewById(R.id.retry_button);
+        retryButton = findViewById(R.id.retry_button);  // FloatingActionButton
 
         // Setup RecyclerView
         LinearLayoutManager layoutManager = new LinearLayoutManager(this);
@@ -248,9 +268,13 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         // Setup input controls
         updateInputState(false);
 
-        // Setup button listeners
-        sendButton.setOnClickListener(v -> sendMessage());
-        retryButton.setOnClickListener(v -> retryConnection());
+        // Setup button listeners - ✅ FIXED: Handle potential null values
+        if (sendButton != null) {
+            sendButton.setOnClickListener(v -> sendMessage());
+        }
+        if (retryButton != null) {
+            retryButton.setOnClickListener(v -> retryConnection());
+        }
 
         // Show initial status
         showConnectionStatus("Preparing to connect...", true);
@@ -284,7 +308,6 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         });
     }
 
-    // ✅ COMPLETE loadLocalMessages METHOD
     // ✅ UPDATED: Load local messages with timezone correction
     private void loadLocalMessages() {
         executor.execute(() -> {
@@ -332,8 +355,6 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
             }
         });
     }
-
-
 
     // ✅ COMPLETE connectToServerSafely METHOD
     private void connectToServerSafely() {
@@ -602,6 +623,7 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         }
     }
 
+    // ✅ FIXED: Handle FloatingActionButton instead of Button
     private void updateInputState(boolean enabled) {
         if (messageInput != null) {
             messageInput.setEnabled(enabled);
@@ -814,6 +836,7 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         super.onDestroy();
     }
 }
+
 // [ChatAdapter and ChatMessage classes remain the same as in your original code]
 class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.ChatViewHolder> {
     private final List<ChatMessage> messages;
@@ -865,27 +888,21 @@ class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.ChatViewHolder> {
     public void onBindViewHolder(@NonNull ChatViewHolder holder, int position) {
         ChatMessage message = messages.get(position);
 
-        holder.messageText.setText(message.getMessage());
-
-        // Set message info
-        String info = message.getSender() + " • " + message.getTimestamp();
-        if (message.isHistorical()) {
-            info += " • Historical";
+        // ✅ FIXED: Handle the actual TextView with ID message_text
+        if (holder.messageTextView != null) {
+            holder.messageTextView.setText(message.getMessage());
         }
-        holder.infoText.setText(info);
 
-        // Set background based on message type
-        switch (message.getType()) {
-            case ChatMessage.TYPE_ADMIN:
-                holder.messageText.setBackgroundResource(R.drawable.bg_message_admin);
-                break;
-            case ChatMessage.TYPE_SYSTEM:
-                holder.messageText.setBackgroundResource(R.drawable.bg_message_system);
-                break;
-            default:
-                holder.messageText.setBackgroundResource(R.drawable.bg_message_device);
-                break;
+        // Set message info with null check
+        if (holder.infoText != null) {
+            String info = message.getSender() + " • " + message.getTimestamp();
+            if (message.isHistorical()) {
+                info += " • Historical";
+            }
+            holder.infoText.setText(info);
         }
+
+        // No need to set background resources since your layouts use CardViews with predefined colors
     }
 
     @Override
@@ -894,18 +911,29 @@ class ChatAdapter extends RecyclerView.Adapter<ChatAdapter.ChatViewHolder> {
     }
 
     static class ChatViewHolder extends RecyclerView.ViewHolder {
-        TextView messageText;
+        TextView messageTextView;  // The TextView with ID message_text
         TextView infoText;
 
         ChatViewHolder(View itemView) {
             super(itemView);
-            messageText = itemView.findViewById(R.id.message_text);
-            infoText = itemView.findViewById(R.id.info_text);
+            try {
+                // Your layouts use message_text as the ID for the TextView
+                messageTextView = itemView.findViewById(R.id.message_text);
+                infoText = itemView.findViewById(R.id.info_text);
+
+                // Log if views are not found for debugging
+                if (messageTextView == null) {
+                    Log.w("ChatAdapter", "message_text TextView not found in layout");
+                }
+                if (infoText == null) {
+                    Log.w("ChatAdapter", "info_text TextView not found in layout");
+                }
+            } catch (Exception e) {
+                Log.e("ChatAdapter", "Error finding views in ChatViewHolder", e);
+            }
         }
     }
 }
-// === CHAT MESSAGE MODEL ===
-
 class ChatMessage {
     public static final int TYPE_ADMIN = 1;
     public static final int TYPE_DEVICE = 2;

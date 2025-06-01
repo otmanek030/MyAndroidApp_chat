@@ -27,110 +27,423 @@ import androidx.core.app.ActivityCompat;
 import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+
+import com.google.android.material.appbar.MaterialToolbar;
+import com.google.android.material.bottomnavigation.BottomNavigationView;
+import com.google.android.material.card.MaterialCardView;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
-import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton;
 import com.google.android.material.snackbar.Snackbar;
 import com.google.android.material.textfield.TextInputEditText;
+import com.google.android.material.transition.platform.MaterialContainerTransformSharedElementCallback;
+
 import com.plcoding.audiorecorder.api.RetrofitClient;
 import com.plcoding.audiorecorder.data.RecordingRepository;
 import com.plcoding.audiorecorder.playback.AndroidAudioPlayer;
 import com.plcoding.audiorecorder.record.AndroidAudioRecorder;
 import com.plcoding.audiorecorder.ui.theme.RecordingAdapter;
 import com.plcoding.audiorecorder.ui.theme.RecordingViewModel;
-import com.plcoding.audiorecorder.utils.DraggableButtonHelper;
 import com.plcoding.audiorecorder.data.Recording;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import com.plcoding.audiorecorder.forms.ChecklistCategory;
-
-
 public class MainActivity extends AppCompatActivity {
+    private static final String TAG = "MainActivity";
+
+    // Core components
     private AndroidAudioRecorder recorder;
     private AndroidAudioPlayer player;
     private RecordingViewModel viewModel;
+
+    // UI Components
+    private MaterialToolbar toolbar;
+    private SwipeRefreshLayout swipeRefreshLayout;
     private RecyclerView recyclerView;
     private RecordingAdapter adapter;
+    private BottomNavigationView bottomNavigation;
+    private ExtendedFloatingActionButton recordingFab;
 
-    // FAB Menu - Updated to include task checklist FAB
-    private FloatingActionButton fabMain;
-    private FloatingActionButton fabVoice;
-    private FloatingActionButton fabText;
-    private FloatingActionButton fabTaskChecklist; // ADD THIS
-    private View overlay;
-    private boolean isFabMenuOpen = false;
+    // Quick Action Cards
+    private MaterialCardView voiceRecordingCard;
+    private MaterialCardView textNoteCard;
+    private MaterialCardView taskChecklistCard;
+
+    // Status Views
+    private TextView networkStatus;
+    private TextView syncStatus;
+    private View emptyStateLayout;
+
+    // State
     private boolean isRecording = false;
+    private boolean isInitialized = false;
 
-    private DraggableButtonHelper draggableHelper;
-    private static final String TAG = "MainActivity";
-
-    // For background operations
+    // Background operations
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // Set up shared element transitions
+        setExitSharedElementCallback(new MaterialContainerTransformSharedElementCallback());
+        getWindow().setSharedElementsUseOverlay(false);
+
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // Initialize views
-        initializeViews();
+        initializeComponents();
+//        setupToolbar();
+        setupBottomNavigation();
+        setupQuickActionCards();
+        setupRecyclerView();
+        setupSwipeRefresh();
+        observeViewModel();
 
-        // Initialize recorder and player
+        requestNecessaryPermissions();
+        checkServerConnection();
+
+        isInitialized = true;
+    }
+
+    private void initializeComponents() {
+        // Initialize core components
         recorder = new AndroidAudioRecorder(getApplicationContext());
         player = new AndroidAudioPlayer(getApplicationContext());
 
         // Initialize ViewModel
         RecordingViewModel.Factory factory = new RecordingViewModel.Factory(
-                getApplicationContext(),
-                recorder,
-                player
+                getApplicationContext(), recorder, player
         );
         viewModel = new ViewModelProvider(this, factory).get(RecordingViewModel.class);
 
-        // Try to sync any pending uploads
-        // After your existing initialization code
-        TextView networkStatusText = findViewById(R.id.network_status);
+        // Find views
+        toolbar = findViewById(R.id.toolbar);
+        swipeRefreshLayout = findViewById(R.id.swipe_refresh_layout);
+        recyclerView = findViewById(R.id.recordings_recycler_view);
+        bottomNavigation = findViewById(R.id.bottom_navigation);
+        recordingFab = findViewById(R.id.recording_fab);
 
-        // Check network status - PROPERLY USING BACKGROUND THREAD
-        checkServerConnection(networkStatusText);
+        voiceRecordingCard = findViewById(R.id.voice_recording_card);
+        textNoteCard = findViewById(R.id.text_note_card);
+        taskChecklistCard = findViewById(R.id.task_checklist_card);
 
-        // Request permissions including storage for Android 10 and below
-        requestNecessaryPermissions();
-
-        // Setup RecyclerView
-        setupRecyclerView();
-
-        // Setup FAB menu BEFORE draggable functionality
-        setupFabMenu();
-
-        // Setup draggable functionality AFTER setting click listener
-        setupDraggableFab();
-
-        // Observe ViewModel
-        observeViewModel();
-
-        // Setup dynamic padding
-        setupDynamicPadding();
+        networkStatus = findViewById(R.id.network_status);
+        syncStatus = findViewById(R.id.sync_status);
+        emptyStateLayout = findViewById(R.id.empty_state_layout);
     }
 
-    /**
-     * Request all necessary permissions based on Android version
-     */
+//    private void setupToolbar() {
+//        setSupportActionBar(toolbar);
+//        if (getSupportActionBar() != null) {
+//            getSupportActionBar().setTitle(getString(R.string.app_name));
+//        }
+//    }
+
+    private void setupBottomNavigation() {
+        bottomNavigation.setOnItemSelectedListener(item -> {
+            int itemId = item.getItemId();
+
+            if (itemId == R.id.nav_home) {
+                // Already on home
+                return true;
+            } else if (itemId == R.id.nav_chat) {
+                startActivity(new Intent(this, ConversationsActivity.class));
+                return true;
+            } else if (itemId == R.id.nav_tasks) {
+                startActivity(new Intent(this, TaskChecklistActivity.class));
+                return true;
+            } else if (itemId == R.id.nav_profile) {
+                // Start profile activity (to be implemented)
+                showFeatureComingSoon("Profile");
+                return true;
+            }
+
+            return false;
+        });
+
+        // Set home as selected by default
+        bottomNavigation.setSelectedItemId(R.id.nav_home);
+    }
+
+    private void setupQuickActionCards() {
+        // Voice Recording Card
+        voiceRecordingCard.setOnClickListener(v -> {
+            if (isRecording) {
+                stopVoiceRecording();
+            } else {
+                startVoiceRecording();
+            }
+        });
+
+        // Text Note Card
+        textNoteCard.setOnClickListener(v -> showTextInputDialog());
+
+        // Task Checklist Card
+        taskChecklistCard.setOnClickListener(v -> {
+            Intent intent = new Intent(this, TaskChecklistActivity.class);
+            startActivity(intent);
+        });
+
+        // Recording FAB
+        if (recordingFab != null) {
+            recordingFab.setOnClickListener(v -> {
+                if (isRecording) {
+                    stopVoiceRecording();
+                } else {
+                    startVoiceRecording();
+                }
+            });
+        }
+    }
+
+    private void setupRecyclerView() {
+        recyclerView.setLayoutManager(new LinearLayoutManager(this));
+        adapter = new RecordingAdapter(
+                this::handleRecordingPlay,
+                this::handleRecordingStop,
+                this::handleRecordingDelete
+        );
+        recyclerView.setAdapter(adapter);
+
+        // Add scroll listener for FAB behavior
+        recyclerView.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
+                super.onScrolled(recyclerView, dx, dy);
+
+                if (recordingFab != null) {
+                    if (dy > 0 && recordingFab.getVisibility() == View.VISIBLE) {
+                        // Scrolling down - hide FAB
+                        recordingFab.hide();
+                    } else if (dy < 0 && recordingFab.getVisibility() != View.VISIBLE) {
+                        // Scrolling up - show FAB
+                        recordingFab.show();
+                    }
+                }
+            }
+        });
+    }
+
+    private void setupSwipeRefresh() {
+        swipeRefreshLayout.setColorSchemeResources(
+                R.color.primary,
+                R.color.secondary,
+                R.color.tertiary
+        );
+
+        swipeRefreshLayout.setOnRefreshListener(() -> {
+            refreshData();
+        });
+    }
+
+    private void observeViewModel() {
+        viewModel.getRecordings().observe(this, recordings -> {
+            if (recordings != null) {
+                adapter.setRecordings(recordings);
+                updateEmptyState(recordings.isEmpty());
+            }
+        });
+
+        viewModel.getIsRecording().observe(this, isRecordingState -> {
+            if (isRecordingState != null) {
+                isRecording = isRecordingState;
+                updateRecordingUI(isRecordingState);
+            }
+        });
+
+        viewModel.getIsPlaying().observe(this, isPlaying -> {
+            if (isPlaying != null) {
+                adapter.setIsPlaying(isPlaying);
+            }
+        });
+
+        viewModel.getCurrentlyPlayingId().observe(this, currentlyPlayingId -> {
+            adapter.setCurrentlyPlayingId(currentlyPlayingId);
+        });
+
+        viewModel.getIsSyncing().observe(this, isSyncing -> {
+            if (Boolean.TRUE.equals(isSyncing)) {
+                syncStatus.setText(R.string.syncing);
+                syncStatus.setTextColor(getColor(R.color.warning));
+            } else {
+                syncStatus.setText(R.string.synced);
+                syncStatus.setTextColor(getColor(R.color.success));
+            }
+        });
+
+        viewModel.getSyncMessage().observe(this, message -> {
+            if (message != null && !message.isEmpty() && isInitialized) {
+                showSnackbar(message);
+            }
+        });
+    }
+
+    private void handleRecordingPlay(Recording recording) {
+        if (recording.isVoiceRecording()) {
+            viewModel.playRecording(recording.getId());
+        } else {
+            showTextContent(recording.getTextContent());
+        }
+    }
+
+    private void handleRecordingStop(Recording recording) {
+        viewModel.stopPlayback();
+    }
+
+    private void handleRecordingDelete(Recording recording) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.delete_recording_title)
+                .setMessage(R.string.delete_recording_message)
+                .setPositiveButton(R.string.delete, (dialog, which) -> {
+                    viewModel.deleteRecording(recording.getId());
+                    showSnackbar(getString(R.string.recording_deleted));
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    private void updateRecordingUI(boolean isRecording) {
+        if (isRecording) {
+            // Update voice recording card to show stop state
+            voiceRecordingCard.setCardBackgroundColor(getColor(R.color.error_container));
+
+            // Update FAB if visible
+            if (recordingFab != null && recordingFab.getVisibility() == View.VISIBLE) {
+                recordingFab.setText(R.string.stop_recording);
+                recordingFab.setIcon(getDrawable(R.drawable.ic_stop));
+                recordingFab.setBackgroundTintList(getColorStateList(R.color.error));
+            }
+        } else {
+            // Restore normal state
+            voiceRecordingCard.setCardBackgroundColor(getColor(R.color.surface));
+
+            if (recordingFab != null && recordingFab.getVisibility() == View.VISIBLE) {
+                recordingFab.setText(R.string.record);
+                recordingFab.setIcon(getDrawable(R.drawable.ic_mic));
+                recordingFab.setBackgroundTintList(getColorStateList(R.color.primary));
+            }
+        }
+    }
+
+    private void updateEmptyState(boolean isEmpty) {
+        if (isEmpty) {
+            recyclerView.setVisibility(View.GONE);
+            emptyStateLayout.setVisibility(View.VISIBLE);
+        } else {
+            recyclerView.setVisibility(View.VISIBLE);
+            emptyStateLayout.setVisibility(View.GONE);
+        }
+    }
+
+    @SuppressLint("UseCompatLoadingForColorStateLists")
+    private void startVoiceRecording() {
+        try {
+            viewModel.startRecording();
+            showSnackbar(getString(R.string.recording_started));
+        } catch (Exception e) {
+            Log.e(TAG, "Error starting recording", e);
+            showSnackbar(getString(R.string.error_starting_recording));
+        }
+    }
+
+    private void stopVoiceRecording() {
+        try {
+            viewModel.stopRecording();
+            showSnackbar(getString(R.string.recording_stopped));
+        } catch (Exception e) {
+            Log.e(TAG, "Error stopping recording", e);
+            showSnackbar(getString(R.string.error_stopping_recording));
+        }
+    }
+
+    private void showTextInputDialog() {
+        View view = LayoutInflater.from(this).inflate(R.layout.dialog_text_input_enhanced, null);
+        TextInputEditText editText = view.findViewById(R.id.text_input);
+
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.create_text_note)
+                .setView(view)
+                .setPositiveButton(R.string.save, (dialog, which) -> {
+                    String text = editText.getText() != null ? editText.getText().toString().trim() : "";
+                    if (!text.isEmpty()) {
+                        viewModel.saveTextRecording(text);
+                        showSnackbar(getString(R.string.text_note_saved));
+                    } else {
+                        showSnackbar(getString(R.string.text_cannot_be_empty));
+                    }
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    private void showTextContent(String content) {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.text_note)
+                .setMessage(content)
+                .setPositiveButton(R.string.ok, null)
+                .show();
+    }
+
+    private void refreshData() {
+        // Simulate refresh delay
+        mainHandler.postDelayed(() -> {
+            swipeRefreshLayout.setRefreshing(false);
+            checkServerConnection();
+            viewModel.syncWithServer();
+        }, 1000);
+    }
+
+    private void checkServerConnection() {
+        executor.execute(() -> {
+            boolean isServerAvailable = false;
+
+            try {
+                RetrofitClient client = RetrofitClient.getInstance(this);
+                isServerAvailable = client.isServerReachable();
+            } catch (Exception e) {
+                Log.e(TAG, "Error checking server connection", e);
+            }
+
+            final boolean finalIsServerAvailable = isServerAvailable;
+
+            mainHandler.post(() -> {
+                if (finalIsServerAvailable) {
+                    networkStatus.setText(R.string.online);
+                    networkStatus.setTextColor(getColor(R.color.success));
+                    trySyncPendingUploads();
+                } else {
+                    networkStatus.setText(R.string.offline);
+                    networkStatus.setTextColor(getColor(R.color.error));
+                }
+            });
+        });
+    }
+
+    private void trySyncPendingUploads() {
+        executor.execute(() -> {
+            try {
+                RecordingRepository repository = new RecordingRepository(this);
+                int pendingCount = repository.getPendingUploadsCount();
+
+                if (pendingCount > 0) {
+                    mainHandler.post(() -> {
+                        showSnackbar(getString(R.string.syncing_pending_uploads, pendingCount));
+                    });
+                    repository.syncPendingUploads(null);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error syncing pending uploads", e);
+            }
+        });
+    }
+
     private void requestNecessaryPermissions() {
         String[] permissions;
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             permissions = new String[]{
                     Manifest.permission.RECORD_AUDIO,
                     Manifest.permission.READ_MEDIA_AUDIO,
-                    Manifest.permission.INTERNET,
-                    Manifest.permission.ACCESS_NETWORK_STATE
-            };
-        } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            permissions = new String[]{
-                    Manifest.permission.RECORD_AUDIO,
-                    Manifest.permission.READ_EXTERNAL_STORAGE,
                     Manifest.permission.INTERNET,
                     Manifest.permission.ACCESS_NETWORK_STATE
             };
@@ -147,544 +460,102 @@ public class MainActivity extends AppCompatActivity {
         ActivityCompat.requestPermissions(this, permissions, 0);
     }
 
-    /**
-     * Check server connection using background thread
-     */
-    private void checkServerConnection(TextView networkStatusText) {
-        // Set initial status
-        networkStatusText.setText("Checking...");
-        networkStatusText.setTextColor(Color.GRAY);
-
-        // Use executor service to run network operations on background thread
-        executor.execute(() -> {
-            boolean isServerAvailable = false;
-            String errorMessage = null;
-
-            try {
-                Log.d(TAG, "Testing server connection...");
-
-                // Try different methods to connect to server
-                RetrofitClient client = RetrofitClient.getInstance(MainActivity.this);
-
-                // First try HTTP connection
-                isServerAvailable = client.isServerReachable();
-                Log.d(TAG, "HTTP check result: " + isServerAvailable);
-
-                // If HTTP fails, try socket connection
-                if (!isServerAvailable) {
-                    isServerAvailable = client.pingServer();
-                    Log.d(TAG, "Socket check result: " + isServerAvailable);
-                }
-
-                Log.d(TAG, "Server available: " + isServerAvailable);
-            } catch (Exception e) {
-                Log.e(TAG, "Error checking server connection", e);
-                errorMessage = e.getMessage();
-            }
-
-            // Need final variables for lambda
-            final boolean finalIsServerAvailable = isServerAvailable;
-            final String finalErrorMessage = errorMessage;
-
-            // Update UI on main thread
-            mainHandler.post(() -> {
-                if (finalIsServerAvailable) {
-                    networkStatusText.setText("Online");
-                    networkStatusText.setTextColor(Color.GREEN);
-                    // If online, try to sync pending uploads
-                    trySyncPendingUploads();
-                } else {
-                    networkStatusText.setText("Offline");
-                    networkStatusText.setTextColor(Color.RED);
-
-                    // Show toast with better error message
-                    String message = "Server unavailable. Check your network connection or server status.";
-                    if (finalErrorMessage != null) {
-                        message += " Error: " + finalErrorMessage;
-                    }
-                    Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
-
-                    // Show dialog with server configuration option
-                    offerServerConfiguration();
-                }
-            });
-        });
+    private void showSnackbar(String message) {
+        if (recyclerView != null) {
+            Snackbar.make(recyclerView, message, Snackbar.LENGTH_SHORT).show();
+        }
     }
 
-    private void offerServerConfiguration() {
-        new AlertDialog.Builder(this)
-                .setTitle("Server Connection Failed")
-                .setMessage("Unable to connect to the server. Would you like to update the server configuration?")
-                .setPositiveButton("Configure Server", (dialog, which) -> {
-                    // Open server configuration
-                    Intent intent = new Intent(MainActivity.this, ServerConfigActivity.class);
-                    startActivity(intent);
-                })
-                .setNegativeButton("Try Again", (dialog, which) -> {
-                    // Retry connection
-                    TextView networkStatusText = findViewById(R.id.network_status);
-                    checkServerConnection(networkStatusText);
-                })
-                .setNeutralButton("Cancel", null)
-                .show();
-    }
-
-    /**
-     * Try to sync any pending uploads
-     */
-    private void trySyncPendingUploads() {
-        executor.execute(() -> {
-            try {
-                RecordingRepository repository = new RecordingRepository(MainActivity.this);
-                int pendingCount = repository.getPendingUploadsCount();
-
-                if (pendingCount > 0) {
-                    mainHandler.post(() -> {
-                        Snackbar.make(recyclerView,
-                                "Found " + pendingCount + " pending uploads. Syncing...",
-                                Snackbar.LENGTH_LONG).show();
-                    });
-
-                    repository.syncPendingUploads(null);
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "Error syncing pending uploads", e);
-            }
-        });
+    private void showFeatureComingSoon(String featureName) {
+        showSnackbar(featureName + " coming soon!");
     }
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
-        getMenuInflater().inflate(R.menu.main_menu, menu);
+        getMenuInflater().inflate(R.menu.main_menu_enhanced, menu);
         return true;
     }
 
-    private void openTaskChecklistEnhanced() {
-        Intent intent = new Intent(MainActivity.this, TaskChecklistActivity.class);
-        intent.putExtra("enhanced_ui", true); // Flag for enhanced UI
-        startActivity(intent);
-    }
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        int id = item.getItemId();
 
-    // ADD THIS METHOD FOR MENU ITEM SELECTION
-//    @Override
-//    public boolean onOptionsItemSelected(MenuItem item) {
-//        int id = item.getItemId();
-//
-//        if (id == R.id.action_task_checklist) {
-//            Intent intent = new Intent(this, TaskChecklistActivity.class);
-//            startActivity(intent);
-//            return true;
-//        } else if (id == R.id.action_conversations) {
-//            Intent intent = new Intent(this, ConversationsActivity.class);
-//            startActivity(intent);
-//            return true;
-//        } else if (id == R.id.action_sync) {
-//            forceSyncAll();
-//            return true;
-//        } else if (id == R.id.action_settings) {
-//            Intent intent = new Intent(this, ServerConfigActivity.class);
-//            startActivity(intent);
-//            return true;
-//        }
-//
-//        return super.onOptionsItemSelected(item);
-//    }
-
-    /**
-     * Force sync all pending uploads
-     */
-    private void forceSyncAll() {
-        Snackbar syncingSnackbar = Snackbar.make(recyclerView,
-                "Syncing all recordings...", Snackbar.LENGTH_INDEFINITE);
-        syncingSnackbar.show();
-
-        executor.execute(() -> {
-            try {
-                RecordingRepository repository = new RecordingRepository(MainActivity.this);
-                repository.forceUploadPending(new RecordingRepository.OperationCallback() {
-                    @Override
-                    public void onSuccess() {
-                        mainHandler.post(() -> {
-                            syncingSnackbar.dismiss();
-                            Snackbar.make(recyclerView,
-                                    "Sync completed successfully",
-                                    Snackbar.LENGTH_SHORT).show();
-                        });
-                    }
-
-                    @Override
-                    public void onError(String errorMessage) {
-                        mainHandler.post(() -> {
-                            syncingSnackbar.dismiss();
-                            Snackbar.make(recyclerView,
-                                    "Sync error: " + errorMessage,
-                                    Snackbar.LENGTH_LONG).show();
-                        });
-                    }
-                });
-            } catch (Exception e) {
-                mainHandler.post(() -> {
-                    syncingSnackbar.dismiss();
-                    Snackbar.make(recyclerView,
-                            "Sync error: " + e.getMessage(),
-                            Snackbar.LENGTH_LONG).show();
-                });
-            }
-        });
-    }
-
-    // UPDATED METHOD WITH TASK CHECKLIST INTEGRATION
-    private void initializeViews() {
-        recyclerView = findViewById(R.id.recordings_recycler_view);
-        fabMain = findViewById(R.id.fab_main);
-        fabVoice = findViewById(R.id.fab_voice);
-        fabText = findViewById(R.id.fab_text);
-        fabTaskChecklist = findViewById(R.id.fab_task_checklist);    // ADD THIS
-        overlay = findViewById(R.id.overlay);
-
-        // Initialize conversations button
-        Button conversationsButton = findViewById(R.id.conversations_button);
-        if (conversationsButton != null) {
-            conversationsButton.setOnClickListener(v -> {
-                Intent intent = new Intent(MainActivity.this, ConversationsActivity.class);
-                startActivity(intent);
-            });
+        if (id == R.id.action_search) {
+            // Implement search functionality
+            showFeatureComingSoon("Search");
+            return true;
+        } else if (id == R.id.action_sync) {
+            viewModel.syncWithServer();
+            return true;
+        } else if (id == R.id.action_settings) {
+            startActivity(new Intent(this, ServerConfigActivity.class));
+            return true;
         }
 
-        // ADD THIS: Initialize task checklist button
-        Button taskChecklistButton = findViewById(R.id.task_checklist_button);
-        if (taskChecklistButton != null) {
-            taskChecklistButton.setOnClickListener(v -> {
-                Intent intent = new Intent(MainActivity.this, TaskChecklistActivity.class);
-                startActivity(intent);
-            });
-        }
-    }
-
-    private void setupRecyclerView() {
-        recyclerView.setLayoutManager(new LinearLayoutManager(this));
-        adapter = new RecordingAdapter(
-                recording -> {
-                    if (recording.isVoiceRecording()) {
-                        viewModel.playRecording(recording.getId());
-                    } else {
-                        showTextContent(recording.getTextContent());
-                    }
-                },
-                recording -> viewModel.stopPlayback(),
-                this::showDeleteConfirmation
-        );
-        recyclerView.setAdapter(adapter);
-    }
-
-    // UPDATED METHOD WITH TASK CHECKLIST FAB
-    private void setupFabMenu() {
-        // Set click listener first
-        fabMain.setOnClickListener(v -> handleMainFabClick());
-
-        fabVoice.setOnClickListener(v -> {
-            closeFabMenu();
-            startVoiceRecording();
-        });
-
-        fabText.setOnClickListener(v -> {
-            closeFabMenu();
-            showTextInputDialog();
-        });
-
-        // Enhanced Task Checklist FAB with new features
-        if (fabTaskChecklist != null) {
-            fabTaskChecklist.setOnClickListener(v -> {
-                closeFabMenu();
-                openTaskChecklistEnhanced(); // Use enhanced version
-            });
-        }
-
-        overlay.setOnClickListener(v -> closeFabMenu());
-    }
-
-
-    private void openEnhancedChecklist() {
-        Intent intent = new Intent(MainActivity.this, ChecklistCompletionActivity.class);
-        intent.putExtra("form_id", 1); // Example form ID
-        intent.putExtra("form_title", "Enhanced Safety Checklist");
-        intent.putExtra("is_mandatory", true);
-        startActivity(intent);
-    }
-
-    // ADD THIS METHOD:
-    private void openTaskChecklist() {
-        Intent intent = new Intent(MainActivity.this, TaskChecklistActivity.class);
-        startActivity(intent);
-    }
-
-    private void setupDraggableFab() {
-        draggableHelper = new DraggableButtonHelper();
-        draggableHelper.makeDraggable(fabMain, null);
-
-        // Add listener to update RecyclerView padding when FAB is moved
-        fabMain.getViewTreeObserver().addOnGlobalLayoutListener(this::updateRecyclerViewPadding);
-    }
-
-    private void setupDynamicPadding() {
-        // Initial padding setup
-        fabMain.post(this::updateRecyclerViewPadding);
-    }
-
-    private void updateRecyclerViewPadding() {
-        // Get FAB position
-        int[] location = new int[2];
-        fabMain.getLocationOnScreen(location);
-        int fabTop = location[1];
-        int fabHeight = fabMain.getHeight();
-
-        // Get screen dimensions
-        int screenHeight = getResources().getDisplayMetrics().heightPixels;
-
-        // Calculate bottom padding based on FAB position
-        int bottomPadding = screenHeight - fabTop + 20; // Extra 20dp margin
-
-        // Apply padding to RecyclerView
-        recyclerView.setPadding(
-                recyclerView.getPaddingLeft(),
-                recyclerView.getPaddingTop(),
-                recyclerView.getPaddingRight(),
-                bottomPadding
-        );
-    }
-
-    private void handleMainFabClick() {
-        if (isRecording) {
-            stopVoiceRecording();
-        } else {
-            toggleFabMenu();
-        }
-    }
-
-    private void toggleFabMenu() {
-        if (isFabMenuOpen) {
-            closeFabMenu();
-        } else {
-            openFabMenu();
-        }
-    }
-
-    private void openFabMenu() {
-        isFabMenuOpen = true;
-
-        // Show overlay with fade animation
-        overlay.setVisibility(View.VISIBLE);
-        overlay.animate().alpha(1f).setDuration(200).start();
-
-        // Rotate main FAB
-        fabMain.animate().rotation(45f).setDuration(200).start();
-
-        // Show menu FABs with animation - position them relative to main FAB
-        showMenuFabs();
-    }
-
-    // UPDATED METHOD TO INCLUDE TASK CHECKLIST FAB
-    private void showMenuFabs() {
-        // Get main FAB position
-        float mainFabX = fabMain.getX();
-        float mainFabY = fabMain.getY();
-
-        // Position voice FAB
-        fabVoice.setX(mainFabX);
-        fabVoice.setY(mainFabY - dpToPx(70));
-        animateFabIn(fabVoice);
-
-        // Position text FAB
-        fabText.setX(mainFabX);
-        fabText.setY(mainFabY - dpToPx(140));
-        animateFabIn(fabText);
-
-        // ADD THIS: Position task checklist FAB
-        if (fabTaskChecklist != null) {
-            fabTaskChecklist.setX(mainFabX);
-            fabTaskChecklist.setY(mainFabY - dpToPx(210));
-            animateFabIn(fabTaskChecklist);
-        }
-    }
-
-    // UPDATED METHOD TO INCLUDE TASK CHECKLIST FAB
-    private void closeFabMenu() {
-        isFabMenuOpen = false;
-
-        // Hide overlay with fade animation
-        overlay.animate().alpha(0f).setDuration(200).withEndAction(() ->
-                overlay.setVisibility(View.GONE)
-        ).start();
-
-        // Rotate main FAB back
-        fabMain.animate().rotation(0f).setDuration(200).start();
-
-        // Hide menu FABs with animation
-        animateFabOut(fabText);
-        animateFabOut(fabVoice);
-
-        // ADD THIS: Hide task checklist FAB
-        if (fabTaskChecklist != null) {
-            animateFabOut(fabTaskChecklist);
-        }
-    }
-
-    private void animateFabIn(FloatingActionButton fab) {
-        fab.setVisibility(View.VISIBLE);
-        fab.setAlpha(0f);
-        fab.setScaleX(0.5f);
-        fab.setScaleY(0.5f);
-
-        fab.animate()
-                .alpha(1f)
-                .scaleX(1f)
-                .scaleY(1f)
-                .setDuration(200)
-                .start();
-    }
-
-    private void animateFabOut(FloatingActionButton fab) {
-        fab.animate()
-                .alpha(0f)
-                .scaleX(0.5f)
-                .scaleY(0.5f)
-                .setDuration(200)
-                .withEndAction(() -> fab.setVisibility(View.INVISIBLE))
-                .start();
-    }
-
-    @SuppressLint("UseCompatLoadingForColorStateLists")
-    private void startVoiceRecording() {
-        viewModel.startRecording();
-        isRecording = true;
-
-        // Change main FAB to stop recording
-        fabMain.setImageResource(R.drawable.ic_stop);
-        fabMain.setBackgroundTintList(getResources().getColorStateList(R.color.delete_color));
-
-        Toast.makeText(this, "Recording started", Toast.LENGTH_SHORT).show();
-    }
-
-    @SuppressLint("UseCompatLoadingForColorStateLists")
-    private void stopVoiceRecording() {
-        viewModel.stopRecording();
-        isRecording = false;
-
-        // Restore main FAB appearance
-        fabMain.setImageResource(R.drawable.ic_add);
-        fabMain.setBackgroundTintList(getResources().getColorStateList(R.color.fab_main));
-
-        Toast.makeText(this, "Recording stopped", Toast.LENGTH_SHORT).show();
-    }
-
-    private void showTextInputDialog() {
-        View view = LayoutInflater.from(this).inflate(R.layout.dialog_text_input, null);
-        TextInputEditText editText = view.findViewById(R.id.text_input);
-
-        if (editText == null) {
-            Log.e(TAG, "EditText not found in dialog layout");
-            Toast.makeText(this, "Error: Input field not found", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        new MaterialAlertDialogBuilder(this)
-                .setTitle("Enter Text Note")
-                .setView(view)
-                .setPositiveButton("Save", (dialog, which) -> {
-                    if (editText.getText() == null) {
-                        Log.e(TAG, "EditText.getText() returned null");
-                        Toast.makeText(this, "Error: Could not get text", Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-
-                    String text = editText.getText().toString().trim();
-                    Log.d(TAG, "Text to save: '" + text + "'");
-
-                    if (!text.isEmpty()) {
-                        Log.d(TAG, "Calling viewModel.saveTextRecording");
-                        viewModel.saveTextRecording(text);
-                        Toast.makeText(this, "Text note saved", Toast.LENGTH_SHORT).show();
-                    } else {
-                        Log.w(TAG, "Text is empty");
-                        Toast.makeText(this, "Text cannot be empty", Toast.LENGTH_SHORT).show();
-                    }
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
-    private void showTextContent(String content) {
-        new MaterialAlertDialogBuilder(this)
-                .setTitle("Text Note")
-                .setMessage(content)
-                .setPositiveButton("OK", null)
-                .show();
-    }
-
-    private void showDeleteConfirmation(Recording recording) {
-        new MaterialAlertDialogBuilder(this)
-                .setTitle("Delete Recording")
-                .setMessage("Are you sure you want to delete this recording?")
-                .setPositiveButton("Delete", (dialog, which) -> {
-                    viewModel.deleteRecording(recording.getId());
-                    Toast.makeText(this, "Recording deleted", Toast.LENGTH_SHORT).show();
-                })
-                .setNegativeButton("Cancel", null)
-                .show();
-    }
-
-    private void observeViewModel() {
-        viewModel.getRecordings().observe(this, recordings -> {
-            if (recordings != null) {
-                adapter.setRecordings(recordings);
-            }
-        });
-
-        viewModel.getIsPlaying().observe(this, isPlaying -> {
-            if (isPlaying != null) {
-                adapter.setIsPlaying(isPlaying);
-            }
-        });
-
-        viewModel.getCurrentlyPlayingId().observe(this, currentlyPlayingId -> {
-            adapter.setCurrentlyPlayingId(currentlyPlayingId);
-        });
-
-        // New sync observers
-        viewModel.getIsSyncing().observe(this, isSyncing -> {
-            if (Boolean.TRUE.equals(isSyncing)) {
-                // Show sync in progress UI
-                Snackbar.make(recyclerView, "Syncing with server...", Snackbar.LENGTH_INDEFINITE).show();
-            }
-        });
-
-        viewModel.getSyncMessage().observe(this, message -> {
-            if (message != null && !message.isEmpty()) {
-                Snackbar.make(recyclerView, message, Snackbar.LENGTH_SHORT).show();
-            }
-        });
-    }
-
-    private int dpToPx(int dp) {
-        float density = getResources().getDisplayMetrics().density;
-        return Math.round(dp * density);
+        return super.onOptionsItemSelected(item);
     }
 
     @Override
-    public void onBackPressed() {
-        if (isFabMenuOpen) {
-            closeFabMenu();
-        } else {
-            super.onBackPressed();
+    protected void onResume() {
+        super.onResume();
+
+        // Set bottom navigation selection
+        bottomNavigation.setSelectedItemId(R.id.nav_home);
+
+        // Check connection status
+        checkServerConnection();
+
+        // Show FAB if not recording
+        if (recordingFab != null && !isRecording) {
+            recordingFab.show();
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+
+        // Hide FAB to prevent overlay issues
+        if (recordingFab != null) {
+            recordingFab.hide();
         }
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        recorder.stop();
-        player.stop();
-        // Shut down the executor to prevent memory leaks
+
+        // Clean up resources
+        if (recorder != null) {
+            recorder.stop();
+        }
+        if (player != null) {
+            player.stop();
+        }
+
+        // Shutdown executor
         executor.shutdown();
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (isRecording) {
+            // Show confirmation dialog if recording
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.stop_recording_title)
+                    .setMessage(R.string.stop_recording_message)
+                    .setPositiveButton(R.string.stop_and_save, (dialog, which) -> {
+                        stopVoiceRecording();
+                        super.onBackPressed();
+                    })
+                    .setNegativeButton(R.string.cancel, null)
+                    .setNeutralButton(R.string.discard, (dialog, which) -> {
+                        viewModel.cancelRecording();
+                        super.onBackPressed();
+                    })
+                    .show();
+        } else {
+            super.onBackPressed();
+        }
     }
 }

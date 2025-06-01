@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Only include styles that use API 26+ attributes -->
+
+    <style name="Widget.AudioRecorder.Button" parent="Widget.Material3.CardView.Elevated">
+        <item name="cornerRadius">20dp</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:paddingHorizontal">24dp</item>
+    </style>
+
+    <style name="Widget.AudioRecorder.RecordingCard" parent="Widget.Material3.CardView.Filled">
+        <item name="android:layout_marginVertical">4dp</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:foreground">?android:attr/selectableItemBackground</item>
+    </style>
+</resources>
