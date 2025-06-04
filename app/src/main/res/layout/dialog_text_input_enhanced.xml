@@ -26,6 +26,8 @@
             android:inputType="textCapSentences|textMultiLine"
             android:scrollbars="vertical"
             android:maxLength="1000"
+            android:textColor="@color/category_background"
+
             android:contentDescription="Text input field for notes" />
 
     </com.google.android.material.textfield.TextInputLayout>
@@ -37,7 +39,7 @@
         android:layout_marginTop="8dp"
         android:text="Maximum 1000 characters. Use this for quick notes and reminders."
         android:textSize="12sp"
-        android:textColor="@android:color/darker_gray"
+        android:textColor="@color/category_background"
         android:contentDescription="Character limit information" />
 
 </LinearLayout>

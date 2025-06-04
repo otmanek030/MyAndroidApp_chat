@@ -292,7 +292,7 @@
                     android:clipToPadding="false"
                     android:paddingBottom="@dimen/spacing_xl"
                     app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
-                    tools:listitem="    @layout/item_recording_card" />
+                    tools:listitem="@layout/item_recording_card" />
 
             </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 

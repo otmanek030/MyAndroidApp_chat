@@ -9,6 +9,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:hint="Enter your text note..."
+
         style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
 
         <com.google.android.material.textfield.TextInputEditText
@@ -18,7 +19,8 @@
             android:inputType="textMultiLine"
             android:lines="5"
             android:gravity="top"
-            android:padding="12dp" />
+            android:padding="12dp"/>
+
 
     </com.google.android.material.textfield.TextInputLayout>
 

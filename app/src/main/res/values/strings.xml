@@ -135,5 +135,25 @@ c
     <string name="text_note_description">Maximum 1000 characters. Use this for quick notes and reminders.</string>
 
 
+    <!-- ✅ NEW: Photo source control strings -->
+    <string name="photo_camera_only">📸 Camera Only</string>
+    <string name="photo_gallery_only">🖼️ Gallery Only</string>
+    <string name="photo_both_available">📸🖼️ Camera and Gallery</string>
+    <string name="photo_source_camera">Camera</string>
+    <string name="photo_source_gallery">Gallery</string>
+    <string name="photo_captured_from">Photo captured from %s</string>
+    <string name="photo_source_not_available">%s not available for this question</string>
+    <string name="camera_permission_required">Camera permission is required to take photos</string>
+    <string name="photo_processing_failed">Failed to process image</string>
+    <string name="photo_loading_failed">Failed to load image</string>
+    <string name="remove_photo">Remove Photo</string>
+    <string name="take_photo">Take Photo</string>
+    <string name="select_photo">Select Photo</string>
+    <string name="photo_preview">Photo preview</string>
+    <string name="file_size_limit">Max size: %d MB</string>
+    <string name="allowed_file_types">Types: %s</string>
+    <string name="photo_source_info">Source: %s</string>
+
+
 
 </resources>

@@ -1,6 +1,6 @@
-package com.plcoding.audiorecorder.forms;
+// ValidationHelper.java - Android validation helper
 
-import android.annotation.SuppressLint;
+package com.plcoding.audiorecorder.forms;
 
 import java.util.List;
 
@@ -77,7 +77,37 @@ public class ValidationHelper {
         return defaultTypes.contains(extension);
     }
 
-    @SuppressLint("DefaultLocale")
+    // ✅ NEW: Photo source validation methods
+    public static boolean validatePhotoSource(ChecklistQuestion question, String sourceType) {
+        if (question.getPhoto_source() == null) {
+            return false; // No photo source configuration
+        }
+
+        if ("camera".equals(sourceType)) {
+            return question.getPhoto_source().isCamera_enabled();
+        } else if ("gallery".equals(sourceType)) {
+            return question.getPhoto_source().isGallery_enabled();
+        }
+
+        return false;
+    }
+
+    public static boolean validateCameraPreference(ChecklistQuestion question, String cameraType) {
+        if (question.getPhoto_source() == null || !question.getPhoto_source().isCamera_enabled()) {
+            return false;
+        }
+
+        String preference = question.getPhoto_source().getCamera_preference();
+
+        // If preference is "any", any camera type is allowed
+        if ("any".equals(preference)) {
+            return "front".equals(cameraType) || "back".equals(cameraType);
+        }
+
+        // Otherwise, must match the specific preference
+        return preference.equals(cameraType);
+    }
+
     public static String getValidationErrorMessage(ChecklistQuestion question, String input) {
         if (question.isIs_required() && (input == null || input.trim().isEmpty())) {
             return "This field is required";
@@ -121,8 +151,59 @@ public class ValidationHelper {
                     return "Please enter a valid decimal number";
                 }
                 break;
+
+            case ChecklistQuestion.TYPE_PHOTO_UPLOAD:
+                // Validate photo source availability
+                if (question.getPhoto_source() == null) {
+                    return "Photo upload not configured for this question";
+                }
+                break;
         }
 
         return null; // No validation error
+    }
+
+    // ✅ NEW: Get camera preference error message
+    public static String getCameraPreferenceErrorMessage(ChecklistQuestion question, String usedCamera) {
+        if (question.getPhoto_source() == null || !question.getPhoto_source().isCamera_enabled()) {
+            return "Camera not available for this question";
+        }
+
+        String preference = question.getPhoto_source().getCamera_preference();
+
+        if ("any".equals(preference)) {
+            return null; // Any camera is fine
+        }
+
+        if (!preference.equals(usedCamera)) {
+            String expectedCamera = "front".equals(preference) ? "front (selfie)" : "back (main)";
+            String actualCamera = "front".equals(usedCamera) ? "front (selfie)" : "back (main)";
+            return String.format("Expected %s camera but %s camera was used", expectedCamera, actualCamera);
+        }
+
+        return null; // Camera matches preference
+    }
+
+    // ✅ NEW: Check if photo source has specific configuration
+    public static boolean hasPhotoSourceConfiguration(ChecklistQuestion question) {
+        return question.getPhoto_source() != null;
+    }
+
+    public static boolean isCameraOnlyQuestion(ChecklistQuestion question) {
+        return question.getPhoto_source() != null
+                && question.getPhoto_source().isCamera_enabled()
+                && !question.getPhoto_source().isGallery_enabled();
+    }
+
+    public static boolean isGalleryOnlyQuestion(ChecklistQuestion question) {
+        return question.getPhoto_source() != null
+                && !question.getPhoto_source().isCamera_enabled()
+                && question.getPhoto_source().isGallery_enabled();
+    }
+
+    public static boolean isBothSourcesQuestion(ChecklistQuestion question) {
+        return question.getPhoto_source() != null
+                && question.getPhoto_source().isCamera_enabled()
+                && question.getPhoto_source().isGallery_enabled();
     }
 }

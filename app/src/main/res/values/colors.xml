@@ -33,7 +33,7 @@
 
     <!-- Text colors -->
     <color name="textPrimary">#212121</color>
-    <color name="textSecondary">#757575</color>
+    <color name="textSecondary">#100E0E</color>
 
     <!-- Background colors -->
     <color name="category_border">#E9ECEF</color>
@@ -43,14 +43,14 @@
     <color name="remove_button_background">#F44336</color>
 
     <!-- Border and stroke colors -->
-    <color name="icon_tint">#9E9E9E</color>
+    <color name="icon_tint">#A4A1A1</color>
 
     <!-- Status colors -->
     <color name="success_color">#4CAF50</color>
     <color name="warning_color">#FF9800</color>
     <color name="error_color">#F44336</color>
 
-    <!-- Card colors -->
+    <!-- Card colors -->z
     <color name="card_shadow">#1A000000</color>
 
 
@@ -110,7 +110,7 @@
 
     <!-- Surface Colors -->
     <color name="surface">#FFFFFF</color>
-    <color name="on_surface">#212121</color>
+    <color name="on_surface">#212020</color>
     <color name="surface_variant">#F5F5F5</color>
     <color name="on_surface_variant">#424242</color>
     <color name="surface_container">#FAFAFA</color>
@@ -128,6 +128,10 @@
     <color name="colorPrimaryDark">#1976D2</color>
     <color name="colorAccent">#4CAF50</color>
 
+    <color name="fab_voice">#4CAF50</color>
+    <color name="fab_text">#FF9800</color>
+    <color name="fab_task_checklist">#9C27B0</color>
+
     <!-- Additional Colors -->
     <color name="white">#FFFFFF</color>
     <color name="text_primary">#212121</color>
@@ -137,4 +141,22 @@
     <color name="modern_accent">#4CAF50</color>
     <color name="category_background">#FAFAFA</color>
     <color name="stroke_color">#E0E0E0</color>
+
+
+
+    <color name="camera_blue">#2196F3</color>
+    <color name="camera_blue_dark">#1976D2</color>
+    <color name="gallery_orange">#FF9800</color>
+    <color name="gallery_orange_dark">#F57C00</color>
+    <color name="danger_red_dark">#D32F2F</color>
+    <color name="info_blue">#1976D2</color>
+    <color name="text_hint">#9E9E9E</color>
+    <color name="border_light">#E0E0E0</color>
+    <color name="warning_background">#FFF3E0</color>
+
+
+    <color name="camera_info_color">#1976D2</color>
+    <color name="camera_button_color">#4CAF50</color>
+    <color name="gallery_button_color">#FF9800</color>
+    <color name="remove_button_color">#F44336</color>
 </resources>

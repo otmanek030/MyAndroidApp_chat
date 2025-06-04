@@ -3,22 +3,27 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <item
-        android:id="@+id/action_search"
-        android:icon="@drawable/ic_search"
-        android:title="@string/search"
-        app:showAsAction="ifRoom"
-        app:iconTint="@color/on_surface" />
+        android:id="@+id/action_task_checklist"
+        android:title="Task Checklist"
+        android:icon="@drawable/ic_checklist"
+        app:showAsAction="ifRoom" />
+
+    <item
+        android:id="@+id/action_conversations"
+        android:title="Conversations"
+        android:icon="@drawable/ic_chat"
+        app:showAsAction="ifRoom" />
 
     <item
         android:id="@+id/action_sync"
+        android:title="Sync"
         android:icon="@drawable/ic_sync"
-        android:title="@string/sync"
         app:showAsAction="never" />
 
     <item
         android:id="@+id/action_settings"
+        android:title="Settings"
         android:icon="@drawable/ic_settings"
-        android:title="@string/settings"
         app:showAsAction="never" />
 
 </menu>

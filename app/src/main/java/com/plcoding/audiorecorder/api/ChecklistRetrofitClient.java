@@ -14,7 +14,7 @@ import retrofit2.converter.gson.GsonConverterFactory;
 
 public class ChecklistRetrofitClient {
     private static final String TAG = "ChecklistRetrofitClient";
-    private static final String DEFAULT_BASE_URL = "http://192.168.1.130:8000/checklists/api/";
+    private static final String DEFAULT_BASE_URL = "http://192.168.100.91:8000/checklists/api/";
     private static final String PREF_SERVER_URL = "server_url";
 
     private static volatile ChecklistRetrofitClient instance;
@@ -58,7 +58,7 @@ public class ChecklistRetrofitClient {
 
     private String getChecklistServerUrl() {
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
-        String baseUrl = prefs.getString(PREF_SERVER_URL, "http://192.168.1.130:8000");
+        String baseUrl = prefs.getString(PREF_SERVER_URL, "http://192.168.100.91:8000");
 
         // Remove /api/ if present and add checklists/api/
         baseUrl = baseUrl.replace("/api/", "").replace("/api", "");

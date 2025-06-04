@@ -1,108 +1,143 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- question_photo_enhanced.xml - Enhanced layout for photo upload questions with camera preference -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
     android:padding="16dp"
-    android:layout_marginBottom="12dp"
-    android:background="@drawable/question_card_background">
+    android:background="@drawable/question_background">
 
+    <!-- Question Text -->
     <TextView
         android:id="@+id/question_text"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Question text"
+        android:text="Upload a photo"
         android:textSize="16sp"
         android:textStyle="bold"
-        android:textColor="@color/textPrimary"
+        android:textColor="@color/text_primary"
         android:layout_marginBottom="8dp" />
 
+    <!-- Help Text -->
     <TextView
         android:id="@+id/help_text"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Help text"
+        android:text="Additional instructions for this question"
         android:textSize="14sp"
-        android:textColor="@color/textSecondary"
+        android:textColor="@color/black"
         android:layout_marginBottom="8dp"
         android:visibility="gone" />
 
+    <!-- ✅ NEW: Camera Preference Info -->
     <TextView
-        android:id="@+id/file_info_text"
+        android:id="@+id/camera_info_text"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="File info"
+        android:text="📸 Use the back camera for taking photos 📷"
+        android:textSize="13sp"
+        android:textColor="@color/camera_info_color"
+        android:background="@drawable/camera_info_background"
+        android:padding="10dp"
+        android:layout_marginBottom="8dp"
+        android:visibility="gone"
+        android:drawableStart="@drawable/ic_camera_preference"
+        android:drawablePadding="6dp"
+        android:gravity="center_vertical" />
+
+    <!-- Photo Source Info -->
+    <TextView
+        android:id="@+id/source_info_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="📷 Camera and Gallery available"
         android:textSize="12sp"
-        android:textColor="@color/colorPrimary"
+        android:textColor="@color/info_blue"
+        android:background="@drawable/info_background"
+        android:padding="8dp"
         android:layout_marginBottom="12dp"
         android:visibility="gone"
-        android:background="@drawable/info_background"
-        android:padding="8dp" />
+        android:drawablePadding="4dp" />
 
-    <!-- Photo Preview Area -->
-    <com.google.android.material.card.MaterialCardView
+    <!-- Photo Preview -->
+    <ImageView
+        android:id="@+id/photo_preview"
         android:layout_width="match_parent"
         android:layout_height="200dp"
-        android:layout_marginBottom="16dp"
-        app:cardCornerRadius="12dp"
-        app:cardElevation="2dp"
-        app:strokeWidth="2dp"
-        app:strokeColor="@color/stroke_color">
+        android:layout_marginBottom="12dp"
+        android:background="@drawable/photo_preview_background"
+        android:scaleType="centerInside"
+        android:src="@drawable/ic_add_photo"
+        android:contentDescription="Photo preview" />
 
-        <ImageView
-            android:id="@+id/photo_preview"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:scaleType="center"
-            android:src="@drawable/ic_add_photo"
-            android:background="@color/photo_background" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/remove_photo_button"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:layout_gravity="top|end"
-            android:layout_margin="8dp"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"
-            android:visibility="gone"
-            app:icon="@drawable/ic_close"
-            app:iconGravity="textStart"
-            app:iconPadding="0dp"
-            app:iconSize="16dp"
-            style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
-            app:backgroundTint="@color/remove_button_background" />
-
-    </com.google.android.material.card.MaterialCardView>
-
-    <!-- Action Buttons -->
+    <!-- Photo Action Buttons -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:gravity="center">
+        android:gravity="center"
+        android:layout_marginBottom="12dp">
 
-        <com.google.android.material.button.MaterialButton
+        <!-- Camera Button -->
+        <Button
             android:id="@+id/camera_button"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginEnd="8dp"
-            android:text="Camera"
-            app:icon="@drawable/ic_camera"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton" />
+            android:text="📸 Camera"
+            android:textColor="@android:color/white"
+            android:background="@drawable/button_camera"
+            android:padding="12dp"
+            android:textSize="14sp"
+            android:drawableStart="@drawable/ic_camera"
+            android:drawablePadding="8dp"
+            android:gravity="center" />
 
-        <com.google.android.material.button.MaterialButton
+        <!-- Gallery Button -->
+        <Button
             android:id="@+id/gallery_button"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginStart="8dp"
-            android:text="Gallery"
-            app:icon="@drawable/ic_gallery"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton" />
+            android:text="🖼️ Gallery"
+            android:textColor="@android:color/white"
+            android:background="@drawable/button_gallery"
+            android:padding="12dp"
+            android:textSize="14sp"
+            android:drawableStart="@drawable/ic_gallery"
+            android:drawablePadding="8dp"
+            android:gravity="center" />
 
     </LinearLayout>
+
+    <!-- Remove Photo Button -->
+    <Button
+        android:id="@+id/remove_photo_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🗑️ Remove Photo"
+        android:textColor="@color/danger_red"
+        android:background="@drawable/button_remove"
+        android:layout_marginBottom="12dp"
+        android:visibility="gone"
+        android:padding="8dp"
+        android:textSize="12sp" />
+
+    <!-- File Info Text -->
+    <TextView
+        android:id="@+id/file_info_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Max size: 5MB • Types: jpg, png, gif"
+        android:textSize="12sp"
+        android:textColor="@color/black"
+        android:background="@drawable/file_info_background"
+        android:padding="8dp"
+        android:visibility="gone"
+        android:drawableStart="@drawable/ic_info"
+        android:drawablePadding="4dp" />
 
 </LinearLayout>

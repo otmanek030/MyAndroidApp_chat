@@ -21,7 +21,7 @@ import retrofit2.converter.gson.GsonConverterFactory;
 
 public class RetrofitClient {
     private static final String TAG = "RetrofitClient";
-    private static final String DEFAULT_BASE_URL = "http://192.168.1.130:8000/api/";
+    private static final String DEFAULT_BASE_URL = "http://192.168.100.91:8000/api/";
     private static final String PREF_SERVER_URL = "server_url";
     private static final int CONNECT_TIMEOUT = 15;
     private static final int READ_TIMEOUT = 15;
