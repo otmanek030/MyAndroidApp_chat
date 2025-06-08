@@ -1,4 +1,4 @@
-// ChatWebSocketClient.java - FIXED VERSION WITH TIMEZONE SUPPORT
+// ChatWebSocketClient.java - FIXED VERSION WITH ENHANCED DUPLICATE PREVENTION
 
 package com.plcoding.audiorecorder.api;
 
@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class ChatWebSocketClient extends WebSocketClient {
     private static final String TAG = "ChatWebSocketClient";
@@ -32,7 +33,7 @@ public class ChatWebSocketClient extends WebSocketClient {
     private static final long PING_TIMEOUT = 10000;
 
     // ✅ TIMEZONE SUPPORT
-    private static final String SERVER_TIMEZONE = "Africa/Casablanca"; // Match your server
+    private static final String SERVER_TIMEZONE = "Africa/Casablanca";
     private SimpleDateFormat timestampFormat;
 
     // Ping/pong management
@@ -40,9 +41,12 @@ public class ChatWebSocketClient extends WebSocketClient {
     private final AtomicBoolean waitingForPong = new AtomicBoolean(false);
     private final AtomicBoolean isPinging = new AtomicBoolean(false);
 
-    // Message deduplication
+    // ✅ ENHANCED MESSAGE DEDUPLICATION
     private final Set<String> recentMessageIds = new HashSet<>();
     private final Set<String> recentMessageContent = new HashSet<>();
+    private final Map<String, Long> messageTimestamps = new HashMap<>();
+    private final Map<String, String> messageSources = new HashMap<>(); // Track message sources
+    private final AtomicLong lastProcessedTimestamp = new AtomicLong(0);
 
     // Connection state
     private volatile boolean isClosingPermanently = false;
@@ -54,6 +58,7 @@ public class ChatWebSocketClient extends WebSocketClient {
     private final MessageListener listener;
     private final String deviceId;
     private final String recordingId;
+    private final String connectionId; // ✅ NEW: Unique connection identifier
 
     public interface MessageListener {
         void onMessageReceived(String sender, String message, String timestamp, String messageId, boolean isHistorical);
@@ -69,6 +74,7 @@ public class ChatWebSocketClient extends WebSocketClient {
         this.listener = listener;
         this.deviceId = deviceId;
         this.recordingId = recordingId;
+        this.connectionId = deviceId + "_" + System.currentTimeMillis(); // ✅ NEW: Unique ID
 
         // ✅ INITIALIZE TIMESTAMP FORMATTER
         initializeTimestampFormatter();
@@ -78,6 +84,7 @@ public class ChatWebSocketClient extends WebSocketClient {
 
         Log.d(TAG, "✅ Created WebSocket client for device: " + deviceId + ", recording: " + recordingId);
         Log.d(TAG, "   WebSocket URI: " + serverUri);
+        Log.d(TAG, "   Connection ID: " + connectionId);
     }
 
     // ✅ INITIALIZE TIMESTAMP FORMATTER
@@ -106,6 +113,7 @@ public class ChatWebSocketClient extends WebSocketClient {
             headers.put("User-Agent", "AndroidVoiceRecorder/1.0");
             headers.put("X-Client-Type", "android_mobile");
             headers.put("X-Device-ID", deviceId);
+            headers.put("X-Connection-ID", connectionId); // ✅ NEW: Connection tracking
             headers.put("X-Timezone", TimeZone.getDefault().getID());
 
             if (recordingId != null) {
@@ -195,7 +203,15 @@ public class ChatWebSocketClient extends WebSocketClient {
                 return;
             }
 
-            // ✅ CRITICAL: Don't check for duplicates here - let the UI handle it
+            // ✅ ENHANCED DUPLICATE DETECTION
+            if (isDuplicateMessage(messageId, messageContent, timestamp, "websocket")) {
+                Log.d(TAG, "🔇 Duplicate WebSocket message ignored: " + messageContent.substring(0, Math.min(30, messageContent.length())));
+                return;
+            }
+
+            // ✅ TRACK MESSAGE
+            trackMessage(messageId, messageContent, timestamp, "websocket");
+
             Log.d(TAG, "📤 Processing message from " + sender + ": " + messageContent.substring(0, Math.min(50, messageContent.length())));
 
             if (listener != null) {
@@ -214,6 +230,138 @@ public class ChatWebSocketClient extends WebSocketClient {
             }
         } catch (Exception e) {
             Log.e(TAG, "Error handling message", e);
+        }
+    }
+
+    // ✅ ENHANCED DUPLICATE DETECTION
+    private boolean isDuplicateMessage(String messageId, String content, String timestamp, String source) {
+        // Check by message ID first
+        if (messageId != null && !messageId.isEmpty()) {
+            if (recentMessageIds.contains(messageId)) {
+                Log.d(TAG, "🔇 Duplicate by ID: " + messageId + " (source: " + source + ")");
+                return true;
+            }
+        }
+
+        // Check by content
+        String contentKey = content.trim().toLowerCase();
+        if (!contentKey.isEmpty() && recentMessageContent.contains(contentKey)) {
+            Log.d(TAG, "🔇 Duplicate by content: " + contentKey.substring(0, Math.min(30, contentKey.length())) + "... (source: " + source + ")");
+            return true;
+        }
+
+        // Check by timestamp
+        try {
+            long msgTimestamp = parseTimestamp(timestamp);
+            if (msgTimestamp <= lastProcessedTimestamp.get()) {
+                Log.d(TAG, "🔇 Duplicate by timestamp: " + new Date(msgTimestamp) + " <= " + new Date(lastProcessedTimestamp.get()) + " (source: " + source + ")");
+                return true;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Error parsing timestamp for duplicate check: " + timestamp);
+        }
+
+        // ✅ NEW: Check if we already received this message from another source
+        if (messageId != null && messageSources.containsKey(messageId)) {
+            String previousSource = messageSources.get(messageId);
+            Log.d(TAG, "🔇 Message " + messageId + " already received from " + previousSource + ", ignoring " + source);
+            return true;
+        }
+
+        return false;
+    }
+
+    // ✅ NEW: Track message to prevent duplicates
+    private void trackMessage(String messageId, String content, String timestamp, String source) {
+        // Track by ID
+        if (messageId != null && !messageId.isEmpty()) {
+            recentMessageIds.add(messageId);
+            messageSources.put(messageId, source);
+        }
+
+        // Track by content
+        String contentKey = content.trim().toLowerCase();
+        if (!contentKey.isEmpty()) {
+            recentMessageContent.add(contentKey);
+        }
+
+        // Track timestamp
+        try {
+            long msgTimestamp = parseTimestamp(timestamp);
+            if (msgTimestamp > lastProcessedTimestamp.get()) {
+                lastProcessedTimestamp.set(msgTimestamp);
+            }
+            if (messageId != null) {
+                messageTimestamps.put(messageId, msgTimestamp);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Error parsing timestamp for tracking: " + timestamp);
+        }
+
+        // Clean up old data
+        cleanupOldTrackingData();
+    }
+
+    // ✅ NEW: Parse timestamp properly
+    private long parseTimestamp(String timestamp) {
+        if (timestamp == null || timestamp.trim().isEmpty()) {
+            return System.currentTimeMillis();
+        }
+
+        try {
+            // Try different timestamp formats
+            if (timestamp.contains("T")) {
+                // ISO format
+                return new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault()).parse(timestamp).getTime();
+            } else if (timestamp.contains("-") && timestamp.contains(":")) {
+                // Server format
+                return timestampFormat.parse(timestamp).getTime();
+            } else {
+                // Unix timestamp
+                long unixTimestamp = Long.parseLong(timestamp);
+                if (unixTimestamp < 10000000000L) {
+                    unixTimestamp *= 1000; // Convert to milliseconds
+                }
+                return unixTimestamp;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Error parsing timestamp: " + timestamp + ", using current time");
+            return System.currentTimeMillis();
+        }
+    }
+
+    // ✅ NEW: Clean up old tracking data to prevent memory leaks
+    private void cleanupOldTrackingData() {
+        // Keep only last 100 messages in tracking
+        if (recentMessageIds.size() > 100) {
+            // Convert to array and keep last 50
+            String[] idsArray = recentMessageIds.toArray(new String[0]);
+            recentMessageIds.clear();
+            for (int i = Math.max(0, idsArray.length - 50); i < idsArray.length; i++) {
+                recentMessageIds.add(idsArray[i]);
+            }
+        }
+
+        if (recentMessageContent.size() > 100) {
+            String[] contentArray = recentMessageContent.toArray(new String[0]);
+            recentMessageContent.clear();
+            for (int i = Math.max(0, contentArray.length - 50); i < contentArray.length; i++) {
+                recentMessageContent.add(contentArray[i]);
+            }
+        }
+
+        if (messageSources.size() > 100) {
+            // Remove oldest entries
+            long cutoffTime = System.currentTimeMillis() - (24 * 60 * 60 * 1000); // 24 hours ago
+            messageSources.entrySet().removeIf(entry -> {
+                Long timestamp = messageTimestamps.get(entry.getKey());
+                return timestamp != null && timestamp < cutoffTime;
+            });
+        }
+
+        if (messageTimestamps.size() > 100) {
+            long cutoffTime = System.currentTimeMillis() - (24 * 60 * 60 * 1000);
+            messageTimestamps.entrySet().removeIf(entry -> entry.getValue() < cutoffTime);
         }
     }
 
@@ -257,7 +405,7 @@ public class ChatWebSocketClient extends WebSocketClient {
         }
     }
 
-    // ✅ FIXED: Send message method
+    // ✅ ENHANCED: Send message method with duplicate prevention
     public void sendMessage(String message, String deviceId) {
         if (message == null || message.trim().isEmpty()) {
             Log.d(TAG, "Attempting to send empty message, skipping");
@@ -275,14 +423,19 @@ public class ChatWebSocketClient extends WebSocketClient {
         try {
             JSONObject jsonMessage = new JSONObject();
             jsonMessage.put("message", message);
-            jsonMessage.put("sender_type", "device");  // ✅ FIXED: Always "device" for mobile
+            jsonMessage.put("sender_type", "device");
             jsonMessage.put("device_id", deviceId);
+            jsonMessage.put("connection_id", connectionId); // ✅ NEW: Track connection
             jsonMessage.put("timestamp", getCurrentTimestamp());
 
             String jsonString = jsonMessage.toString();
             send(jsonString);
 
             Log.d(TAG, "✅ Message sent via WebSocket: " + message);
+
+            // ✅ NEW: Track our own message to prevent echo
+            String tempMessageId = "temp_" + connectionId + "_" + System.currentTimeMillis();
+            trackMessage(tempMessageId, message, getCurrentTimestamp(), "sent");
 
         } catch (JSONException e) {
             Log.e(TAG, "Error creating message JSON", e);
@@ -297,8 +450,7 @@ public class ChatWebSocketClient extends WebSocketClient {
         }
     }
 
-
-    // === PING/PONG MANAGEMENT ===
+    // === PING/PONG MANAGEMENT === (unchanged)
     private final Runnable pingRunnable = new Runnable() {
         @Override
         public void run() {
@@ -433,34 +585,6 @@ public class ChatWebSocketClient extends WebSocketClient {
     }
 
     // === UTILITY METHODS ===
-    private boolean isDuplicateMessage(String messageId, String content) {
-        // Check by message ID first
-        if (messageId != null && !messageId.isEmpty()) {
-            if (recentMessageIds.contains(messageId)) {
-                return true;
-            }
-            recentMessageIds.add(messageId);
-
-            // Keep cache size manageable
-            if (recentMessageIds.size() > 100) {
-                recentMessageIds.clear();
-            }
-            return false;
-        }
-
-        // Fall back to content-based deduplication
-        String contentKey = content.trim().toLowerCase();
-        if (recentMessageContent.contains(contentKey)) {
-            return true;
-        }
-
-        recentMessageContent.add(contentKey);
-        if (recentMessageContent.size() > 50) {
-            recentMessageContent.clear();
-        }
-
-        return false;
-    }
 
     // ✅ GET CURRENT TIMESTAMP IN SERVER TIMEZONE
     private String getCurrentTimestamp() {
@@ -482,6 +606,13 @@ public class ChatWebSocketClient extends WebSocketClient {
         isClosingPermanently = true;
         manualClose = true;
         stopPingPong();
+
+        // Clear tracking data
+        recentMessageIds.clear();
+        recentMessageContent.clear();
+        messageTimestamps.clear();
+        messageSources.clear();
+
         super.close();
     }
 
@@ -492,5 +623,16 @@ public class ChatWebSocketClient extends WebSocketClient {
     public void addHeader(String key, String value) {
         // Headers are added via the map in connect() method
         // This is a placeholder for the interface
+    }
+
+    // ✅ NEW: Debug method to get tracking statistics
+    public void logTrackingStats() {
+        Log.d(TAG, "=== TRACKING STATISTICS ===");
+        Log.d(TAG, "Message IDs tracked: " + recentMessageIds.size());
+        Log.d(TAG, "Message content tracked: " + recentMessageContent.size());
+        Log.d(TAG, "Message sources tracked: " + messageSources.size());
+        Log.d(TAG, "Last processed timestamp: " + new Date(lastProcessedTimestamp.get()));
+        Log.d(TAG, "Connection ID: " + connectionId);
+        Log.d(TAG, "===========================");
     }
 }

@@ -24,7 +24,7 @@ public class ServerConfigActivity extends AppCompatActivity {
 
         // Load current URL
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
-        String currentUrl = prefs.getString("server_url","http://192.168.100.91:8000");
+        String currentUrl = prefs.getString("server_url","http://192.168.1.130:8000");
         serverUrlEditText.setText(currentUrl);
 
         saveButton.setOnClickListener(new View.OnClickListener() {

@@ -38,9 +38,12 @@ import java.net.URISyntaxException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.ExecutorService;
@@ -98,6 +101,10 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
     // ✅ ADD: Timezone offset tracking
     private long serverTimeOffset = 0;
     private boolean timezoneSynced = false;
+
+    private final Set<String> recentMessageHashes = new HashSet<>();
+    private final Map<String, Long> recentContentTimestamps = new HashMap<>();
+    private long lastProcessedMessageTime = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -464,13 +471,37 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
         }
 
         try {
+            // ✅ NEW: Track our own message to prevent echo
+            String tempMessageId = "temp_" + deviceId + "_" + System.currentTimeMillis();
+            trackProcessedMessage(tempMessageId, message, getCurrentTimestamp());
+
             chatWebSocket.sendMessage(message, deviceId);
             messageInput.setText("");
             saveMessageLocally(message, true);
 
+            // ✅ NEW: Show optimistic message immediately for better UX
+            ChatMessage optimisticMessage = new ChatMessage(
+                    message, ChatMessage.TYPE_DEVICE, "You", getCurrentTimestamp(), tempMessageId, false
+            );
+            addMessageToChat(optimisticMessage);
+
         } catch (Exception e) {
             Log.e(TAG, "Error sending message", e);
             Toast.makeText(this, "Error sending message", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    // ✅ ADD: Method to get debug statistics
+    public void logDuplicatePreventionStats() {
+        Log.d(TAG, "=== DUPLICATE PREVENTION STATS ===");
+        Log.d(TAG, "Processed message IDs: " + processedMessageIds.size());
+        Log.d(TAG, "Recent message hashes: " + recentMessageHashes.size());
+        Log.d(TAG, "Recent content timestamps: " + recentContentTimestamps.size());
+        Log.d(TAG, "Last processed message time: " + new Date(lastProcessedMessageTime));
+        Log.d(TAG, "==================================");
+
+        if (chatWebSocket != null) {
+            chatWebSocket.logTrackingStats();
         }
     }
 
@@ -676,8 +707,10 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
             return true;
         }
 
-        if (message.getMessageId() != null && processedMessageIds.contains(message.getMessageId())) {
-            Log.d(TAG, "Skipping duplicate message ID: " + message.getMessageId());
+        // Additional check for system messages that shouldn't be shown
+        if (message.getMessage().startsWith("Connected to") ||
+                message.getMessage().startsWith("Loading") ||
+                message.getMessage().contains("messages from chat history")) {
             return true;
         }
 
@@ -702,8 +735,9 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
             return;
         }
 
-        if (messageId != null && processedMessageIds.contains(messageId)) {
-            Log.d(TAG, "Skipping duplicate message: " + messageId);
+        // ✅ ENHANCED: Multiple levels of duplicate detection
+        if (isDuplicateMessage(messageId, message, timestamp, sender)) {
+            Log.d(TAG, "🔇 Duplicate message ignored: ID=" + messageId + ", content=" + message.substring(0, Math.min(30, message.length())));
             return;
         }
 
@@ -736,17 +770,121 @@ public class ChatActivity extends AppCompatActivity implements ChatWebSocketClie
 
             addMessageToChat(chatMessage);
 
-            if (messageId != null) {
-                processedMessageIds.add(messageId);
-            }
+            // ✅ TRACK MESSAGE AFTER ADDING TO UI
+            trackProcessedMessage(messageId, message, timestamp);
 
-            // Save message locally with server timezone
+            // Save message locally with server timezone (only for admin messages, not historical)
             if (messageType == ChatMessage.TYPE_ADMIN && !isHistorical) {
                 saveMessageLocally(message, false);
             }
 
             Log.d(TAG, "✅ Message displayed with server timezone - " + sender + ": " + message + " at " + formattedTimestamp);
         });
+    }
+
+    // ✅ NEW: Enhanced duplicate detection method
+    private boolean isDuplicateMessage(String messageId, String message, String timestamp, String sender) {
+        // Method 1: Check by message ID
+        if (messageId != null && !messageId.isEmpty() && processedMessageIds.contains(messageId)) {
+            Log.d(TAG, "🔇 Duplicate by ID: " + messageId);
+            return true;
+        }
+
+        // Method 2: Check by content hash for messages without IDs
+        String contentKey = createContentKey(message, sender, timestamp);
+        if (recentMessageHashes.contains(contentKey)) {
+            Log.d(TAG, "🔇 Duplicate by content hash: " + contentKey);
+            return true;
+        }
+
+        // Method 3: Check timestamp to avoid very old messages
+        try {
+            Date msgDate = parseTimestamp(timestamp);
+            if (msgDate != null) {
+                long msgTime = msgDate.getTime();
+                if (msgTime <= lastProcessedMessageTime) {
+                    Log.d(TAG, "🔇 Duplicate by timestamp: " + msgDate + " <= " + new Date(lastProcessedMessageTime));
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Error parsing timestamp for duplicate check: " + timestamp);
+        }
+
+        // Method 4: Check for rapid duplicates (same content within 2 seconds)
+        long currentTime = System.currentTimeMillis();
+        String rapidKey = message.trim().toLowerCase();
+        Long lastSeenTime = recentContentTimestamps.get(rapidKey);
+        if (lastSeenTime != null && (currentTime - lastSeenTime) < 2000) {
+            Log.d(TAG, "🔇 Rapid duplicate detected: " + rapidKey.substring(0, Math.min(30, rapidKey.length())));
+            return true;
+        }
+
+        return false;
+    }
+
+    // ✅ NEW: Create content-based key for duplicate detection
+    private String createContentKey(String message, String sender, String timestamp) {
+        return sender + ":" + message.trim().toLowerCase().hashCode() + ":" + (timestamp != null ? timestamp.substring(0, Math.min(16, timestamp.length())) : "");
+    }
+
+    // ✅ NEW: Track processed messages
+    private void trackProcessedMessage(String messageId, String message, String timestamp) {
+        // Track by ID
+        if (messageId != null && !messageId.isEmpty()) {
+            processedMessageIds.add(messageId);
+        }
+
+        // Track by content hash
+        String contentKey = createContentKey(message, "any", timestamp);
+        recentMessageHashes.add(contentKey);
+
+        // Track rapid duplicates
+        String rapidKey = message.trim().toLowerCase();
+        recentContentTimestamps.put(rapidKey, System.currentTimeMillis());
+
+        // Update last processed time
+        try {
+            Date msgDate = parseTimestamp(timestamp);
+            if (msgDate != null) {
+                long msgTime = msgDate.getTime();
+                if (msgTime > lastProcessedMessageTime) {
+                    lastProcessedMessageTime = msgTime;
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Error parsing timestamp for tracking: " + timestamp);
+        }
+
+        // Clean up old data
+        cleanupTrackingData();
+    }
+
+    // ✅ NEW: Clean up tracking data to prevent memory leaks
+    private void cleanupTrackingData() {
+        // Keep only last 100 message IDs
+        if (processedMessageIds.size() > 100) {
+            Iterator<String> iterator = processedMessageIds.iterator();
+            int toRemove = processedMessageIds.size() - 50;
+            for (int i = 0; i < toRemove && iterator.hasNext(); i++) {
+                iterator.next();
+                iterator.remove();
+            }
+        }
+
+        // Keep only last 100 content hashes
+        if (recentMessageHashes.size() > 100) {
+            Iterator<String> iterator = recentMessageHashes.iterator();
+            int toRemove = recentMessageHashes.size() - 50;
+            for (int i = 0; i < toRemove && iterator.hasNext(); i++) {
+                iterator.next();
+                iterator.remove();
+            }
+        }
+
+        // Clean up old rapid duplicate timestamps (older than 1 minute)
+        long cutoffTime = System.currentTimeMillis() - 60000; // 1 minute ago
+        recentContentTimestamps.entrySet().removeIf(entry -> entry.getValue() < cutoffTime);
     }
 
     @Override

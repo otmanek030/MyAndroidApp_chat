@@ -92,6 +92,9 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+
+
+
         initializeComponents();
 //        setupToolbar();
         setupBottomNavigation();
@@ -105,6 +108,8 @@ public class MainActivity extends AppCompatActivity {
 
         isInitialized = true;
     }
+
+
 
     private void initializeComponents() {
         // Initialize core components
@@ -488,7 +493,7 @@ public class MainActivity extends AppCompatActivity {
             viewModel.syncWithServer();
             return true;
         } else if (id == R.id.action_settings) {
-            startActivity(new Intent(this, ServerConfigActivity.class));
+//            startActivity(new Intent(this, ServerConfigActivity.class));
             return true;
         }
 

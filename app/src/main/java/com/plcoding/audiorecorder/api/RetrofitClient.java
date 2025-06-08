@@ -21,7 +21,7 @@ import retrofit2.converter.gson.GsonConverterFactory;
 
 public class RetrofitClient {
     private static final String TAG = "RetrofitClient";
-    private static final String DEFAULT_BASE_URL = "http://192.168.100.91:8000/api/";
+    private static final String DEFAULT_BASE_URL = "http://192.168.1.130:8000/api/";
     private static final String PREF_SERVER_URL = "server_url";
     private static final int CONNECT_TIMEOUT = 15;
     private static final int READ_TIMEOUT = 15;
@@ -129,12 +129,8 @@ public class RetrofitClient {
         }
 
         try {
-            // First try HTTP check
-            if (httpReachabilityCheck()) {
-                return true;
-            }
-
-            // Fallback to socket ping if HTTP fails
+            // Skip HTTP check for now, just use socket ping
+            Log.d(TAG, "Using socket ping only for reachability check");
             return pingServer();
         } finally {
             isCheckingServer.set(false);
@@ -145,15 +141,23 @@ public class RetrofitClient {
         try {
             URL url = new URL(getServerUrl());
             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-            connection.setConnectTimeout(5000);
-            connection.setReadTimeout(5000);
-            connection.setRequestMethod("HEAD");
+            connection.setConnectTimeout(10000); // Increased from 5000
+            connection.setReadTimeout(10000);    // Increased from 5000
+            connection.setRequestMethod("GET");  // Changed from HEAD to GET
+
+            // Important: Follow redirects
+            connection.setInstanceFollowRedirects(true);
+
+            // Add headers that Django expects
+            connection.setRequestProperty("User-Agent", "AudioRecorder-Android/1.0");
+            connection.setRequestProperty("Accept", "application/json");
 
             int responseCode = connection.getResponseCode();
             connection.disconnect();
 
-            boolean reachable = (responseCode == HttpURLConnection.HTTP_OK);
-            Log.d(TAG, "HTTP reachability: " + reachable);
+            // Accept both 200 and other success codes
+            boolean reachable = (responseCode >= 200 && responseCode < 400);
+            Log.d(TAG, "HTTP reachability: " + reachable + " (code: " + responseCode + ")");
             return reachable;
         } catch (Exception e) {
             Log.e(TAG, "HTTP reachability check failed", e);
